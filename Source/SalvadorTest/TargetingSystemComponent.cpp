@@ -1,6 +1,5 @@
 #include "TargetingSystemComponent.h"
 #include "TargetComponent.h"
-
 #include "Camera/CameraComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
@@ -8,129 +7,116 @@
 
 UTargetingSystemComponent::UTargetingSystemComponent()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = false;
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.bStartWithTickEnabled = false;
 }
 
-void UTargetingSystemComponent::TickComponent(
-    float DeltaTime,
-    ELevelTick TickType,
-    FActorComponentTickFunction* ThisTickFunction)
+void UTargetingSystemComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    PerformTrace();
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	PerformTrace();
 }
 
 void UTargetingSystemComponent::BeginAiming()
 {
-    bIsAiming = true;
-    SetComponentTickEnabled(true);
+	bIsAiming = true;
+	SetComponentTickEnabled(true);
 }
 
 void UTargetingSystemComponent::EndAiming()
 {
-    bIsAiming = false;
-
-    SetComponentTickEnabled(false);
-
-    SetCurrentTarget(nullptr);
+	bIsAiming = false;
+	SetComponentTickEnabled(false);
+	SetCurrentTargetActor(nullptr);
+	SetCurrentTarget(nullptr);
 }
 
 void UTargetingSystemComponent::PerformTrace()
 {
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return;
-    }
+	AActor* Owner = GetOwner();
+	if (!Owner) return;
 
-    UCameraComponent* Camera = Owner->FindComponentByClass<UCameraComponent>();
-    if (!Camera)
-    {
-        return;
-    }
+	UCameraComponent* Camera = Owner->FindComponentByClass<UCameraComponent>();
+	if (!Camera) return;
 
-    FVector Start = Camera->GetComponentLocation();
-    FVector End = Start + (Camera->GetForwardVector() * TraceRange);
+	FVector Start = Camera->GetComponentLocation();
+	FVector End = Start + (Camera->GetForwardVector() * TraceRange);
 
-    FHitResult HitResult;
+	TArray<FHitResult> HitResults;
+	FCollisionShape Shape = FCollisionShape::MakeSphere(TraceRadius);
 
-    FCollisionShape Shape = FCollisionShape::MakeSphere(TraceRadius);
+	bool bHit = GetWorld()->SweepMultiByChannel(HitResults, Start, End, FQuat::Identity, ECC_GameTraceChannel1, Shape);
 
-    bool bHit = GetWorld()->SweepSingleByChannel(
-        HitResult,
-        Start,
-        End,
-        FQuat::Identity,
-        ECC_GameTraceChannel1,
-        Shape
-    );
+	UTargetComponent* BestTarget = nullptr;
+	AActor* BestActor = nullptr;
 
-    if (bEnableDebug)
-    {
-        DrawDebugLine(
-            GetWorld(),
-            Start,
-            End,
-            bHit ? FColor::Green : FColor::Red,
-            false,
-            0.1f,
-            0,
-            1.5f
-        );
+	if (bHit)
+	{
+		for (const FHitResult& Hit : HitResults)
+		{
+			BestTarget = Cast<UTargetComponent>(Hit.GetComponent());
+			if (BestTarget)
+			{
+				BestActor = Hit.GetActor();
+				break;
+			}
+		}
+	}
 
-        DrawDebugSphere(
-            GetWorld(),
-            bHit ? HitResult.ImpactPoint : End,
-            TraceRadius,
-            12,
-            bHit ? FColor::Green : FColor::Red,
-            false,
-            0.1f
-        );
+	SetCurrentTargetActor(BestActor);
 
-        if (bHit && GEngine && HitResult.GetComponent())
-        {
-            FString ComponentName = HitResult.GetComponent()->GetName();
+	SetCurrentTarget(BestTarget);
+}
 
-            GEngine->AddOnScreenDebugMessage(
-                -1,
-                0.1f,
-                FColor::Yellow,
-                FString::Printf(TEXT("Hit Component: %s"), *ComponentName)
-            );
-        }
-    }
+void UTargetingSystemComponent::OnAttackStart()
+{
+	for (UTargetComponent* Target : CachedTargetComponents)
+	{
+		if (Target) Target->SetVisible(false);
+	}
+}
 
-    UTargetComponent* HitTarget = nullptr;
+void UTargetingSystemComponent::OnAttackEnd()
+{
+	for (UTargetComponent* Target : CachedTargetComponents)
+	{
+		if (Target) Target->SetVisible(true);
+	}
+}
 
-    if (bHit)
-    {
-        HitTarget = Cast<UTargetComponent>(HitResult.GetComponent());
-    }
+void UTargetingSystemComponent::SetCurrentTargetActor(AActor* NewActor)
+{
+	if (CurrentTargetActor == NewActor) return;
 
-    SetCurrentTarget(HitTarget);
+	for (UTargetComponent* Target : CachedTargetComponents)
+	{
+		if (Target) Target->SetVisible(false);
+	}
+
+	CachedTargetComponents.Reset();
+	CurrentTargetActor = NewActor;
+
+	if (!CurrentTargetActor) return;
+
+	CurrentTargetActor->GetComponents<UTargetComponent>(CachedTargetComponents);
+
+	for (UTargetComponent* Target : CachedTargetComponents)
+	{
+		if (Target) Target->SetVisible(true);
+	}
 }
 
 void UTargetingSystemComponent::SetCurrentTarget(UTargetComponent* NewTarget)
 {
-    if (CurrentTarget == NewTarget)
-    {
-        return;
-    }
+	if (CurrentTarget == NewTarget) return;
 
-    if (CurrentTarget)
-    {
-        CurrentTarget->SetTargetActive(false);
-    }
+	if (CurrentTarget)
+		CurrentTarget->SetSelected(false);
 
-    CurrentTarget = NewTarget;
+	CurrentTarget = NewTarget;
 
-    if (CurrentTarget)
-    {
-        CurrentTarget->SetTargetActive(true);
-    }
+	if (CurrentTarget)
+		CurrentTarget->SetSelected(true);
 
-    OnTargetChanged.Broadcast(CurrentTarget);
+	OnTargetChanged.Broadcast(CurrentTarget);
 }

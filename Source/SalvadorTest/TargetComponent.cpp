@@ -2,18 +2,30 @@
 
 UTargetComponent::UTargetComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = false;
 
-	SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	SetCollisionResponseToAllChannels(ECR_Ignore);
-	SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
+    SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    SetCollisionResponseToAllChannels(ECR_Ignore);
+    SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
+
+    SetHiddenInGame(true);
 }
 
-void UTargetComponent::SetTargetActive(bool bActive)
+void UTargetComponent::SetVisible(bool bShow)
 {
-	if (bIsActiveTarget == bActive) return;
+    SetHiddenInGame(!bShow);
 
-	bIsActiveTarget = bActive;
+    if (!bShow && bIsActiveTarget)
+    {
+        bIsActiveTarget = false;
+        OnTargetStateChanged.Broadcast(false);
+    }
+}
 
-	OnTargetStateChanged.Broadcast(bIsActiveTarget);
+void UTargetComponent::SetSelected(bool bSelected)
+{
+    if (bIsActiveTarget == bSelected) return;
+
+    bIsActiveTarget = bSelected;
+    OnTargetStateChanged.Broadcast(bIsActiveTarget);
 }

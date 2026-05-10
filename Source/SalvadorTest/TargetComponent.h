@@ -9,19 +9,22 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FTargetStateChangedSignature, bool, 
 UCLASS(ClassGroup = (Combat), meta = (BlueprintSpawnableComponent))
 class SALVADORTEST_API UTargetComponent : public UStaticMeshComponent
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	UTargetComponent();
+    UTargetComponent();
 
-	UFUNCTION(BlueprintCallable, Category = "Targeting")
-	void SetTargetActive(bool bActive);
+    UFUNCTION(BlueprintCallable, Category = "Targeting")
+    void SetVisible(bool bShow);
 
-	bool IsActiveTarget() const { return bIsActiveTarget; }
+    UFUNCTION(BlueprintCallable, Category = "Targeting")
+    void SetSelected(bool bSelected);
 
-	UPROPERTY(BlueprintAssignable, Category = "Targeting")
-	FTargetStateChangedSignature OnTargetStateChanged;
+    bool IsActiveTarget() const { return bIsActiveTarget; }
+
+    UPROPERTY(BlueprintAssignable, Category = "Targeting")
+    FTargetStateChangedSignature OnTargetStateChanged;
 
 private:
-	bool bIsActiveTarget = false;
+    bool bIsActiveTarget = false;
 };
