@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Curves/CurveFloat.h"
+#include "Curves/CurveVector.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "AnimBPNodes.generated.h"
 
@@ -28,6 +29,17 @@ public:
         float DeltaTime,
         bool bReset,
         float& Value,
+        bool& bFinished
+    );
+
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes")
+    static void SampleVectorCurve(
+        UPARAM(ref) FCurvePlayerState& State,
+        UCurveVector* Curve,
+        float Duration,
+        float DeltaTime,
+        bool bReset,
+        FVector& Value,
         bool& bFinished
     );
 };
