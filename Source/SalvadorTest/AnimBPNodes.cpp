@@ -32,6 +32,9 @@ void UAnimBPNodes::SampleCurve(
     Value = Curve->GetFloatValue(NormalizedTime);
 }
 
+// This function is not on use but might be use "for the future".
+// Disclaimer: This is a test so "for the future" doesn't make sense, but I don't like
+//      to remove useful functions that can be useful at one point in the developement
 void UAnimBPNodes::SampleVectorCurve(
     FCurvePlayerState& State,
     UCurveVector* Curve,
