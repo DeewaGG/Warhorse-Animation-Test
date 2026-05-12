@@ -1,4 +1,5 @@
-#pragma once
+﻿#pragma once
+
 #include "CoreMinimal.h"
 #include "Curves/CurveFloat.h"
 #include "Curves/CurveVector.h"
@@ -15,41 +16,49 @@ struct FCurvePlayerState
 };
 
 USTRUCT(BlueprintType)
-struct FReactiveStepsState
+struct FPushState
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "Steps")
-    FVector LeftStart = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadWrite, Category = "Push")
+    FVector TargetPosition = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Steps")
-    FVector LeftEnd = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Steps")
-    float LeftElapsed = 0.f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Steps")
-    bool bLeftActive = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Steps")
-    FVector RightStart = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Steps")
-    FVector RightEnd = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Steps")
-    float RightElapsed = 0.f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Steps")
-    bool bRightActive = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Steps")
-    bool bLeftTurn = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "Steps")
-    int32 StepsRemaining = 0;
+    UPROPERTY(BlueprintReadWrite, Category = "Push")
+    bool bActive = false;
 };
 
+USTRUCT(BlueprintType)
+struct FProceduralFootState
+{
+    GENERATED_BODY()
+
+    // Estado plantado
+    UPROPERTY(BlueprintReadWrite, Category = "Foot")
+    FVector PlantedActorWorldPos = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Foot")
+    FVector PlantedIKGoal = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Foot")
+    bool bIsPlanted = false;
+
+    // Posición natural del pie (= IK goal inicial), usada como destino del paso
+    UPROPERTY(BlueprintReadWrite, Category = "Foot")
+    FVector RestIKGoal = FVector::ZeroVector;
+
+    // Animación del paso
+    UPROPERTY(BlueprintReadWrite, Category = "Foot")
+    bool bIsStepping = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Foot")
+    FVector StepStartWorldXY = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Foot")
+    float StepElapsed = 0.f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Foot")
+    float StepHeight = 8.f;
+};
 UCLASS()
 class SALVADORTEST_API UAnimBPNodes : public UBlueprintFunctionLibrary
 {
@@ -79,25 +88,23 @@ public:
     );
 
     UFUNCTION(BlueprintCallable, Category = "AnimBPNodes")
-    static void TriggerReactiveSteps(
-        UPARAM(ref) FReactiveStepsState& State,
-        FVector LeftIKGoal,
-        FVector RightIKGoal,
-        FVector PelvisIKGoal,
-        FVector ImpactDirection,
-        float StepDistance,
-        float ArcHeight,
-        int32 NumSteps
+    static void InitProceduralFoot(
+        UPARAM(ref) FProceduralFootState& State,
+        FVector ActorWorldPosition,
+        FVector CurrentIKGoal,
+        float StepHeight
     );
 
     UFUNCTION(BlueprintCallable, Category = "AnimBPNodes")
-    static void TickReactiveSteps(
-        UPARAM(ref) FReactiveStepsState& State,
+    static void UpdateProceduralFoot(
+        UPARAM(ref) FProceduralFootState& State,
+        FVector ActorWorldPosition,
+        FRotator ActorWorldRotation,
+        float StepTriggerDistance,
         float StepDuration,
         float DeltaTime,
-        FVector& OutLeftIKGoal,
-        FVector& OutRightIKGoal,
-        bool& bAnyStepActive,
-        bool& bStepJustFinished
+        bool bOtherFootStepping,
+        FVector& OutIKGoal,
+        bool& bOutIsStepping
     );
 };

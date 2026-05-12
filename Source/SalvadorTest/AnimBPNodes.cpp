@@ -12,17 +12,22 @@ void UAnimBPNodes::SampleCurve(
 {
     Value = 0.f;
     bFinished = false;
+
     if (bReset)
         State.ElapsedTime = 0.f;
+
     if (!Curve || Duration <= 0.f)
         return;
+
     if (State.ElapsedTime < Duration)
         State.ElapsedTime += DeltaTime;
+
     if (State.ElapsedTime >= Duration)
     {
         State.ElapsedTime = Duration;
         bFinished = true;
     }
+
     float NormalizedTime = FMath::Clamp(State.ElapsedTime / Duration, 0.f, 1.f);
     Value = Curve->GetFloatValue(NormalizedTime);
 }
@@ -53,110 +58,89 @@ void UAnimBPNodes::SampleVectorCurve(
     Value = Curve->GetVectorValue(NormalizedTime);
 }
 
-void UAnimBPNodes::TriggerReactiveSteps(
-    FReactiveStepsState& State,
-    FVector LeftIKGoal,
-    FVector RightIKGoal,
-    FVector PelvisIKGoal,
-    FVector ImpactDirection,
-    float StepDistance,
-    float ArcHeight,
-    int32 NumSteps)
+void UAnimBPNodes::InitProceduralFoot(
+    FProceduralFootState& State,
+    FVector ActorWorldPosition,
+    FVector CurrentIKGoal,
+    float StepHeight)
 {
-    FVector LeftOffset = LeftIKGoal - PelvisIKGoal;
-    FVector RightOffset = RightIKGoal - PelvisIKGoal;
-
-    LeftOffset.Z = FMath::Abs(LeftOffset.Z);
-    RightOffset.Z = FMath::Abs(RightOffset.Z);
-
-    State.LeftStart = LeftOffset;
-    State.RightStart = RightOffset;
-
-    FVector Delta = FVector(ImpactDirection.X, ImpactDirection.Y, 0.f)
-        .GetSafeNormal() * StepDistance;
-
-    State.LeftEnd = LeftOffset + Delta;
-    State.RightEnd = RightOffset + Delta;
-
-
-    State.LeftElapsed = 0.f;
-    State.RightElapsed = 0.f;
-    State.bLeftActive = false;
-    State.bRightActive = false;
-    State.StepsRemaining = FMath::Clamp(NumSteps, 1, 2);
-
-    State.bLeftTurn = false;
-    State.bRightActive = true;
-    State.StepsRemaining--;
+    State.RestIKGoal = CurrentIKGoal;
+    State.PlantedActorWorldPos = ActorWorldPosition;
+    State.PlantedIKGoal = CurrentIKGoal;
+    State.bIsPlanted = true;
+    State.bIsStepping = false;
+    State.StepElapsed = 0.f;
+    State.StepHeight = StepHeight;
 }
 
-void UAnimBPNodes::TickReactiveSteps(
-    FReactiveStepsState& State,
+void UAnimBPNodes::UpdateProceduralFoot(
+    FProceduralFootState& State,
+    FVector ActorWorldPosition,
+    FRotator ActorWorldRotation,
+    float StepTriggerDistance,
     float StepDuration,
     float DeltaTime,
-    FVector& OutLeftIKGoal,
-    FVector& OutRightIKGoal,
-    bool& bAnyStepActive,
-    bool& bStepJustFinished)
+    bool bOtherFootStepping,
+    FVector& OutIKGoal,
+    bool& bOutIsStepping)
 {
-    bStepJustFinished = false;
-    bAnyStepActive = State.bLeftActive || State.bRightActive
-        || State.StepsRemaining > 0;
-
-    if (State.bRightActive)
+    if (State.bIsStepping)
     {
-        State.RightElapsed += DeltaTime;
-        float Alpha = FMath::Clamp(State.RightElapsed / StepDuration, 0.f, 1.f);
+        State.StepElapsed += DeltaTime;
+        float Alpha = FMath::Clamp(State.StepElapsed / StepDuration, 0.f, 1.f);
 
-        OutRightIKGoal = FMath::Lerp(State.RightStart, State.RightEnd, Alpha);
-        OutRightIKGoal.Z += 12.f * FMath::Sin(Alpha * PI);
+        // Target en world XY: posición natural relativa al actor actual
+        FVector TargetWorldXY = ActorWorldPosition +
+            ActorWorldRotation.RotateVector(
+                FVector(State.RestIKGoal.X, State.RestIKGoal.Y, 0.f));
+
+        // Lerp de la posición de inicio al target
+        FVector FootWorldXY = FMath::Lerp(State.StepStartWorldXY, TargetWorldXY, Alpha);
+
+        // Convierte world XY a IK goal
+        FVector LocalOffset = ActorWorldRotation.UnrotateVector(
+            FootWorldXY - ActorWorldPosition);
+
+        OutIKGoal = FVector(
+            LocalOffset.X,
+            LocalOffset.Y,
+            State.RestIKGoal.Z + State.StepHeight * FMath::Sin(Alpha * PI)
+        );
 
         if (Alpha >= 1.f)
         {
-            State.bRightActive = false;
-            State.RightStart = State.RightEnd;
-            bStepJustFinished = true;
-
-            if (State.StepsRemaining > 0)
-            {
-                State.bLeftActive = true;
-                State.LeftElapsed = 0.f;
-                State.StepsRemaining--;
-            }
+            // Planta el pie en la nueva posición
+            State.PlantedActorWorldPos = ActorWorldPosition;
+            State.PlantedIKGoal = State.RestIKGoal;
+            State.bIsPlanted = true;
+            State.bIsStepping = false;
         }
     }
     else
     {
-        OutRightIKGoal = State.RightStart;
-    }
+        // Fórmula de plantado normal
+        FVector WorldDelta = ActorWorldPosition - State.PlantedActorWorldPos;
+        FVector LocalDelta = ActorWorldRotation.UnrotateVector(WorldDelta);
 
-    if (State.bLeftActive)
-    {
-        State.LeftElapsed += DeltaTime;
-        float Alpha = FMath::Clamp(State.LeftElapsed / StepDuration, 0.f, 1.f);
+        OutIKGoal = FVector(
+            State.PlantedIKGoal.X - LocalDelta.X,
+            State.PlantedIKGoal.Y - LocalDelta.Y,
+            State.PlantedIKGoal.Z
+        );
 
-        OutLeftIKGoal = FMath::Lerp(State.LeftStart, State.LeftEnd, Alpha);
-        OutLeftIKGoal.Z += 12.f * FMath::Sin(Alpha * PI);
-
-        if (Alpha >= 1.f)
+        // Trigger del paso: el actor se alejó demasiado del punto de plantado
+        float DistFromPlant = FVector2D(WorldDelta.X, WorldDelta.Y).Size();
+        if (DistFromPlant > StepTriggerDistance && !bOtherFootStepping)
         {
-            State.bLeftActive = false;
-            State.LeftStart = State.LeftEnd;
-            bStepJustFinished = true;
+            // Captura la posición world actual del pie como inicio del paso
+            State.StepStartWorldXY = State.PlantedActorWorldPos +
+                ActorWorldRotation.RotateVector(
+                    FVector(State.PlantedIKGoal.X, State.PlantedIKGoal.Y, 0.f));
 
-            if (State.StepsRemaining > 0)
-            {
-                State.bRightActive = true;
-                State.RightElapsed = 0.f;
-                State.StepsRemaining--;
-            }
+            State.StepElapsed = 0.f;
+            State.bIsStepping = true;
         }
     }
-    else
-    {
-        OutLeftIKGoal = State.LeftStart;
-    }
 
-    bAnyStepActive = State.bLeftActive || State.bRightActive
-        || State.StepsRemaining > 0;
+    bOutIsStepping = State.bIsStepping;
 }
