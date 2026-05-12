@@ -1,146 +1,217 @@
 #include "AnimBPNodes.h"
-#include "Curves/CurveVector.h"
+#include "Curves/CurveFloat.h"
+
+static float RandFromRange(FVector2D Range)
+{
+    return FMath::RandRange(Range.X, Range.Y);
+}
 
 void UAnimBPNodes::SampleCurve(
-    FCurvePlayerState& State,
+    FCurveSamplerState& State,
     UCurveFloat* Curve,
     float Duration,
     float DeltaTime,
     bool bReset,
-    float& Value,
-    bool& bFinished)
+    float& OutValue,
+    bool& bOutFinished)
 {
-    Value = 0.f;
-    bFinished = false;
+    OutValue = 0.f;
+    bOutFinished = false;
 
     if (bReset)
-        State.ElapsedTime = 0.f;
+        State.Elapsed = 0.f;
 
     if (!Curve || Duration <= 0.f)
         return;
 
-    if (State.ElapsedTime < Duration)
-        State.ElapsedTime += DeltaTime;
+    if (State.Elapsed < Duration)
+        State.Elapsed += DeltaTime;
 
-    if (State.ElapsedTime >= Duration)
+    if (State.Elapsed >= Duration)
     {
-        State.ElapsedTime = Duration;
-        bFinished = true;
+        State.Elapsed = Duration;
+        bOutFinished = true;
     }
 
-    float NormalizedTime = FMath::Clamp(State.ElapsedTime / Duration, 0.f, 1.f);
-    Value = Curve->GetFloatValue(NormalizedTime);
+    OutValue = Curve->GetFloatValue(FMath::Clamp(State.Elapsed / Duration, 0.f, 1.f));
 }
 
-void UAnimBPNodes::SampleVectorCurve(
-    FCurvePlayerState& State,
-    UCurveVector* Curve,
-    float Duration,
+void UAnimBPNodes::SetupFootIK(
+    FFootIKState& Foot,
+    USkeletalMeshComponent* Mesh,
+    FName FootBone,
+    FName HipBone,
+    FVector ActorWorldPos,
+    FVector CurrentGoal,
+    FVector2D StrideThreshold,
+    FVector2D StrideDuration,
+    FVector2D StrideHeight,
+    FVector2D StrideCooldown,
+    FVector2D StrideReach,
+    bool bForceFirstStride)
+{
+    Foot.Mesh = Mesh;
+    Foot.FootBone = FootBone;
+    Foot.HipBone = HipBone;
+    Foot.NeutralGoal = CurrentGoal;
+    Foot.StrideThreshold = StrideThreshold;
+    Foot.StrideDuration = StrideDuration;
+    Foot.StrideHeight = StrideHeight;
+    Foot.StrideCooldown = StrideCooldown;
+    Foot.StrideReach = StrideReach;
+
+    Foot.AnchorWorldPos = ActorWorldPos;
+    Foot.AnchorGoal = CurrentGoal;
+    Foot.bAnchored = true;
+    Foot.bStriding = false;
+    Foot.bForceStride = bForceFirstStride;
+    Foot.StrideElapsed = 0.f;
+    Foot.CooldownTimer = 0.f;
+
+    Foot.ActiveDuration = RandFromRange(StrideDuration);
+    Foot.ActiveHeight = RandFromRange(StrideHeight);
+    Foot.ActiveReach = RandFromRange(StrideReach);
+    Foot.ActiveCooldown = RandFromRange(StrideCooldown);
+    Foot.ActiveThreshold = RandFromRange(StrideThreshold);
+}
+
+void UAnimBPNodes::SolveFoot(
+    FFootIKState& Foot,
+    FVector ActorWorldPos,
+    FRotator ActorWorldRot,
+    FVector FootBoneWorld,
+    FVector HipBoneWorld,
     float DeltaTime,
-    bool bReset,
-    FVector& Value,
-    bool& bFinished)
+    bool bAnyFootBusy,
+    FVector& OutGoal)
 {
-    Value = FVector::ZeroVector;
-    bFinished = false;
-    if (bReset)
-        State.ElapsedTime = 0.f;
-    if (!Curve || Duration <= 0.f)
-        return;
-    if (State.ElapsedTime < Duration)
-        State.ElapsedTime += DeltaTime;
-    if (State.ElapsedTime >= Duration)
+    OutGoal = Foot.AnchorGoal;
+
+    if (Foot.bStriding)
     {
-        State.ElapsedTime = Duration;
-        bFinished = true;
-    }
-    float NormalizedTime = FMath::Clamp(State.ElapsedTime / Duration, 0.f, 1.f);
-    Value = Curve->GetVectorValue(NormalizedTime);
-}
+        Foot.StrideElapsed += DeltaTime;
+        float SafeDuration = FMath::Max(Foot.ActiveDuration, 0.01f);
+        float Alpha = FMath::Clamp(Foot.StrideElapsed / SafeDuration, 0.f, 1.f);
 
-void UAnimBPNodes::InitProceduralFoot(
-    FProceduralFootState& State,
-    FVector ActorWorldPosition,
-    FVector CurrentIKGoal,
-    float StepHeight)
-{
-    State.RestIKGoal = CurrentIKGoal;
-    State.PlantedActorWorldPos = ActorWorldPosition;
-    State.PlantedIKGoal = CurrentIKGoal;
-    State.bIsPlanted = true;
-    State.bIsStepping = false;
-    State.StepElapsed = 0.f;
-    State.StepHeight = StepHeight;
-}
+        // Todo en IK goal space: interpola desde el goal actual hasta NeutralGoal
+        FVector2D StartXY = FVector2D(Foot.StrideStartGoal.X, Foot.StrideStartGoal.Y);
+        FVector2D NeutralXY = FVector2D(Foot.NeutralGoal.X, Foot.NeutralGoal.Y);
 
-void UAnimBPNodes::UpdateProceduralFoot(
-    FProceduralFootState& State,
-    FVector ActorWorldPosition,
-    FRotator ActorWorldRotation,
-    float StepTriggerDistance,
-    float StepDuration,
-    float DeltaTime,
-    bool bOtherFootStepping,
-    FVector& OutIKGoal,
-    bool& bOutIsStepping)
-{
-    if (State.bIsStepping)
-    {
-        State.StepElapsed += DeltaTime;
-        float Alpha = FMath::Clamp(State.StepElapsed / StepDuration, 0.f, 1.f);
+        // StrideReach: sobrepasa el neutral en la dirección del paso
+        FVector2D StrideDir = (NeutralXY - StartXY).GetSafeNormal();
+        FVector2D TargetXY = NeutralXY + StrideDir * Foot.ActiveReach;
 
-        // Target en world XY: posición natural relativa al actor actual
-        FVector TargetWorldXY = ActorWorldPosition +
-            ActorWorldRotation.RotateVector(
-                FVector(State.RestIKGoal.X, State.RestIKGoal.Y, 0.f));
+        FVector2D CurrentXY = FMath::Lerp(StartXY, TargetXY, Alpha);
 
-        // Lerp de la posición de inicio al target
-        FVector FootWorldXY = FMath::Lerp(State.StepStartWorldXY, TargetWorldXY, Alpha);
-
-        // Convierte world XY a IK goal
-        FVector LocalOffset = ActorWorldRotation.UnrotateVector(
-            FootWorldXY - ActorWorldPosition);
-
-        OutIKGoal = FVector(
-            LocalOffset.X,
-            LocalOffset.Y,
-            State.RestIKGoal.Z + State.StepHeight * FMath::Sin(Alpha * PI)
+        OutGoal = FVector(
+            CurrentXY.X,
+            CurrentXY.Y,
+            Foot.NeutralGoal.Z + Foot.ActiveHeight * FMath::Sin(Alpha * PI)
         );
 
         if (Alpha >= 1.f)
         {
-            // Planta el pie en la nueva posición
-            State.PlantedActorWorldPos = ActorWorldPosition;
-            State.PlantedIKGoal = State.RestIKGoal;
-            State.bIsPlanted = true;
-            State.bIsStepping = false;
+            Foot.AnchorWorldPos = ActorWorldPos;
+            Foot.AnchorGoal = FVector(TargetXY.X, TargetXY.Y, Foot.NeutralGoal.Z);
+            Foot.bAnchored = true;
+            Foot.bStriding = false;
+            Foot.CooldownTimer = Foot.ActiveCooldown;
+
+            Foot.ActiveDuration = RandFromRange(Foot.StrideDuration);
+            Foot.ActiveHeight = RandFromRange(Foot.StrideHeight);
+            Foot.ActiveReach = RandFromRange(Foot.StrideReach);
+            Foot.ActiveCooldown = RandFromRange(Foot.StrideCooldown);
+            Foot.ActiveThreshold = RandFromRange(Foot.StrideThreshold);
         }
     }
     else
     {
-        // Fórmula de plantado normal
-        FVector WorldDelta = ActorWorldPosition - State.PlantedActorWorldPos;
-        FVector LocalDelta = ActorWorldRotation.UnrotateVector(WorldDelta);
+        if (Foot.CooldownTimer > 0.f)
+        {
+            Foot.CooldownTimer -= DeltaTime;
+            if (Foot.CooldownTimer < 0.f)
+                Foot.CooldownTimer = 0.f;
+        }
 
-        OutIKGoal = FVector(
-            State.PlantedIKGoal.X - LocalDelta.X,
-            State.PlantedIKGoal.Y - LocalDelta.Y,
-            State.PlantedIKGoal.Z
+        FVector WorldDelta = ActorWorldPos - Foot.AnchorWorldPos;
+        FVector LocalDelta = ActorWorldRot.UnrotateVector(WorldDelta);
+
+        OutGoal = FVector(
+            Foot.AnchorGoal.X - LocalDelta.X,
+            Foot.AnchorGoal.Y - LocalDelta.Y,
+            Foot.AnchorGoal.Z
         );
 
-        // Trigger del paso: el actor se alejó demasiado del punto de plantado
-        float DistFromPlant = FVector2D(WorldDelta.X, WorldDelta.Y).Size();
-        if (DistFromPlant > StepTriggerDistance && !bOtherFootStepping)
+        if (!bAnyFootBusy)
         {
-            // Captura la posición world actual del pie como inicio del paso
-            State.StepStartWorldXY = State.PlantedActorWorldPos +
-                ActorWorldRotation.RotateVector(
-                    FVector(State.PlantedIKGoal.X, State.PlantedIKGoal.Y, 0.f));
+            float DistToHip = FVector2D(
+                FootBoneWorld.X - HipBoneWorld.X,
+                FootBoneWorld.Y - HipBoneWorld.Y).Size();
 
-            State.StepElapsed = 0.f;
-            State.bIsStepping = true;
+            if (Foot.bForceStride || DistToHip > Foot.ActiveThreshold)
+            {
+                Foot.StrideStartGoal = OutGoal;
+                Foot.StrideElapsed = 0.f;
+                Foot.bStriding = true;
+                Foot.bForceStride = false;
+            }
         }
     }
+}
 
-    bOutIsStepping = State.bIsStepping;
+void UAnimBPNodes::SolveFootIK(
+    FFootIKState& LeftFoot,
+    FFootIKState& RightFoot,
+    FVector ActorWorldPos,
+    FRotator ActorWorldRot,
+    float DeltaTime,
+    FVector& OutLeftGoal,
+    FVector& OutRightGoal)
+{
+    OutLeftGoal = LeftFoot.AnchorGoal;
+    OutRightGoal = RightFoot.AnchorGoal;
+
+    if (!LeftFoot.Mesh)
+        return;
+
+    FVector LeftBoneWorld = LeftFoot.Mesh->GetBoneLocation(LeftFoot.FootBone);
+    FVector RightBoneWorld = RightFoot.Mesh->GetBoneLocation(RightFoot.FootBone);
+    FVector HipBoneWorld = LeftFoot.Mesh->GetBoneLocation(LeftFoot.HipBone);
+
+    bool bAnyBusy = LeftFoot.bStriding || RightFoot.bStriding
+        || LeftFoot.CooldownTimer > 0.f
+        || RightFoot.CooldownTimer > 0.f;
+
+    float LeftDistToHip = FVector2D(
+        LeftBoneWorld.X - HipBoneWorld.X,
+        LeftBoneWorld.Y - HipBoneWorld.Y).Size();
+
+    float RightDistToHip = FVector2D(
+        RightBoneWorld.X - HipBoneWorld.X,
+        RightBoneWorld.Y - HipBoneWorld.Y).Size();
+
+    if (LeftDistToHip >= RightDistToHip)
+    {
+        SolveFoot(LeftFoot, ActorWorldPos, ActorWorldRot,
+            LeftBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutLeftGoal);
+
+        bAnyBusy = LeftFoot.bStriding || RightFoot.bStriding
+            || LeftFoot.CooldownTimer > 0.f
+            || RightFoot.CooldownTimer > 0.f;
+
+        SolveFoot(RightFoot, ActorWorldPos, ActorWorldRot,
+            RightBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutRightGoal);
+    }
+    else
+    {
+        SolveFoot(RightFoot, ActorWorldPos, ActorWorldRot,
+            RightBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutRightGoal);
+
+        bAnyBusy = LeftFoot.bStriding || RightFoot.bStriding
+            || LeftFoot.CooldownTimer > 0.f
+            || RightFoot.CooldownTimer > 0.f;
+
+        SolveFoot(LeftFoot, ActorWorldPos, ActorWorldRot,
+            LeftBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutLeftGoal);
+    }
 }
