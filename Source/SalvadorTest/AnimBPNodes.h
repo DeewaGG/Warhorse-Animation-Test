@@ -135,6 +135,12 @@ public:
         FVector& OutRightGoal
     );
 
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes")
+    static bool AreFeetRepositioned(
+        const FFootIKState& LeftFoot,
+        const FFootIKState& RightFoot
+    );
+
 private:
 
     static void SolveFoot(

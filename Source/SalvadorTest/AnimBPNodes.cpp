@@ -215,3 +215,13 @@ void UAnimBPNodes::SolveFootIK(
             LeftBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutLeftGoal);
     }
 }
+
+bool UAnimBPNodes::AreFeetRepositioned(
+    const FFootIKState& LeftFoot,
+    const FFootIKState& RightFoot)
+{
+    return !LeftFoot.bStriding
+        && !RightFoot.bStriding
+        && LeftFoot.CooldownTimer <= 0.f
+        && RightFoot.CooldownTimer <= 0.f;
+}
