@@ -196,7 +196,7 @@ void UAnimBPNodes::SolveFootIK(
             LeftBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutLeftGoal);
 
         bAnyBusy = LeftFoot.bStriding || RightFoot.bStriding
-            || LeftFoot.CooldownTimer > 0.f
+            || LeftFoot.CooldownTimer > 0.f 
             || RightFoot.CooldownTimer > 0.f;
 
         SolveFoot(RightFoot, ActorWorldPos, ActorWorldRot,

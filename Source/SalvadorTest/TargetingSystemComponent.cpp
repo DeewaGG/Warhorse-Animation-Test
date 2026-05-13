@@ -39,32 +39,37 @@ void UTargetingSystemComponent::PerformTrace()
 	UCameraComponent* Camera = Owner->FindComponentByClass<UCameraComponent>();
 	if (!Camera) return;
 
-	FVector Start = Camera->GetComponentLocation();
+	FVector Start = Camera->GetComponentLocation() - FVector(0,0,10);
 	FVector End = Start + (Camera->GetForwardVector() * TraceRange);
 
 	TArray<FHitResult> HitResults;
 	FCollisionShape Shape = FCollisionShape::MakeSphere(TraceRadius);
-
-	bool bHit = GetWorld()->SweepMultiByChannel(HitResults, Start, End, FQuat::Identity, ECC_GameTraceChannel1, Shape);
+	GetWorld()->SweepMultiByChannel(
+		HitResults, Start, End, FQuat::Identity, ECC_GameTraceChannel1, Shape);
 
 	UTargetComponent* BestTarget = nullptr;
 	AActor* BestActor = nullptr;
+	float BestDot = -1.f;
 
-	if (bHit)
+	for (const FHitResult& Hit : HitResults)
 	{
-		for (const FHitResult& Hit : HitResults)
+		UTargetComponent* TC = Cast<UTargetComponent>(Hit.GetComponent());
+		if (!TC) continue;
+
+		FVector ToTarget = (TC->GetComponentLocation() - Start).GetSafeNormal();
+		float Dot = FVector::DotProduct(Camera->GetForwardVector(), ToTarget);
+
+		if (Dot > BestDot)
 		{
-			BestTarget = Cast<UTargetComponent>(Hit.GetComponent());
-			if (BestTarget)
-			{
-				BestActor = Hit.GetActor();
-				break;
-			}
+			BestDot = Dot;
+			BestTarget = TC;
+			BestActor = Hit.GetActor();
 		}
 	}
 
-	SetCurrentTargetActor(BestActor);
+	DrawDebugLine(GetWorld(), Start, End, FColor::Green, false, -1.f, 0, 1.f);
 
+	SetCurrentTargetActor(BestActor);
 	SetCurrentTarget(BestTarget);
 }
 
