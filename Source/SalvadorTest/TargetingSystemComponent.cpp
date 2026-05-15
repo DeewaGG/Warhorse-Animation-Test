@@ -39,7 +39,7 @@ void UTargetingSystemComponent::PerformTrace()
 	UCameraComponent* Camera = Owner->FindComponentByClass<UCameraComponent>();
 	if (!Camera) return;
 
-	FVector Start = Camera->GetComponentLocation() - FVector(0,0,10);
+	FVector Start = Camera->GetComponentLocation();
 	FVector End = Start + (Camera->GetForwardVector() * TraceRange);
 
 	TArray<FHitResult> HitResults;
@@ -67,7 +67,8 @@ void UTargetingSystemComponent::PerformTrace()
 		}
 	}
 
-	DrawDebugLine(GetWorld(), Start, End, FColor::Green, false, -1.f, 0, 1.f);
+	if (bEnableDebug)
+		DrawDebugLine(GetWorld(), Start, End, FColor::Green, false, -1.f, 0, 1.f);
 
 	SetCurrentTargetActor(BestActor);
 	SetCurrentTarget(BestTarget);

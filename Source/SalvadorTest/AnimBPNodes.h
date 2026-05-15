@@ -1,9 +1,16 @@
-﻿#pragma once
+#pragma once
 #include "CoreMinimal.h"
 #include "Curves/CurveFloat.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Actor.h"
 #include "AnimBPNodes.generated.h"
+
+DECLARE_LOG_CATEGORY_EXTERN(LogSwordIK, Log, All);
+
+// ─────────────────────────────────────────────
+// CURVE SAMPLER
+// ─────────────────────────────────────────────
 
 USTRUCT(BlueprintType)
 struct FCurveSamplerState
@@ -14,12 +21,14 @@ struct FCurveSamplerState
     float Elapsed = 0.f;
 };
 
+// ─────────────────────────────────────────────
+// FOOT IK
+// ─────────────────────────────────────────────
+
 USTRUCT(BlueprintType)
 struct FFootIKState
 {
     GENERATED_BODY()
-
-    // --- Setup ---
 
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
     USkeletalMeshComponent* Mesh = nullptr;
@@ -47,8 +56,6 @@ struct FFootIKState
 
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
     FVector2D StrideReach = FVector2D(0.f, 0.f);
-
-    // --- Runtime ---
 
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
     FVector AnchorWorldPos = FVector::ZeroVector;
@@ -90,6 +97,87 @@ struct FFootIKState
     float ActiveThreshold = 50.f;
 };
 
+// ─────────────────────────────────────────────
+// HAND IK
+// ─────────────────────────────────────────────
+
+USTRUCT(BlueprintType)
+struct FHandIKState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    USkeletalMeshComponent* Mesh = nullptr;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    AActor* AttackerActor = nullptr;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    FName HandBoneName;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    FName GoalPropertyName;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    FName RotationPropertyName;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    FVector StartHandGoalLocal = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    FVector FinalHandGoalLocal = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    FRotator StartHandRotLocal = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    FRotator FinalHandRotLocal = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    FVector LastPosDelta = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    FRotator LastRotDelta = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    float Duration = 0.1f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    int32 TotalFrames = 0;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    int32 FramesRemaining = 0;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
+    bool bActive = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Slave")
+    bool bHasSlave = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Slave")
+    FName SlaveGoalPropertyName;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Slave")
+    FName SlaveRotationPropertyName;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Position")
+    AActor* VictimActor = nullptr;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Position")
+    FName VictimBoneName;
+
+    // Posición world capturada al terminar TickHandIK — usada por TickHandIKFreeze
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Freeze")
+    FVector FrozenHandWorldPos = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Freeze")
+    bool bFreezeActive = false;
+};
+
+// ─────────────────────────────────────────────
+// LIBRARY
+// ─────────────────────────────────────────────
+
 UCLASS()
 class SALVADORTEST_API UAnimBPNodes : public UBlueprintFunctionLibrary
 {
@@ -97,7 +185,7 @@ class SALVADORTEST_API UAnimBPNodes : public UBlueprintFunctionLibrary
 
 public:
 
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes")
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|Curve")
     static void SampleCurve(
         UPARAM(ref) FCurveSamplerState& State,
         UCurveFloat* Curve,
@@ -108,7 +196,29 @@ public:
         bool& bOutFinished
     );
 
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes")
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|SwordContactIK")
+    static void SolveHandIK(
+        UPARAM(ref) FHandIKState& State,
+        USkeletalMeshComponent* AttackerMesh,
+        FName HandBoneName,
+        const TArray<FName>& ContactSockets,
+        FVector HitLocation,
+        AActor* VictimActor,
+        FName TargetBoneName,
+        FName DomIKLoc,
+        FName DomIKRot,
+        FName SlaveIKLoc,
+        FName SlaveIKRot,
+        float Duration
+    );
+
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|SwordContactIK")
+    static void TickHandIK(
+        UPARAM(ref) FHandIKState& State,
+        float DeltaTime
+    );
+
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|FootIK")
     static void SetupFootIK(
         UPARAM(ref) FFootIKState& Foot,
         USkeletalMeshComponent* Mesh,
@@ -124,7 +234,7 @@ public:
         bool bForceFirstStride
     );
 
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes")
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|FootIK")
     static void SolveFootIK(
         UPARAM(ref) FFootIKState& LeftFoot,
         UPARAM(ref) FFootIKState& RightFoot,
@@ -135,7 +245,7 @@ public:
         FVector& OutRightGoal
     );
 
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes")
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|FootIK")
     static bool AreFeetRepositioned(
         const FFootIKState& LeftFoot,
         const FFootIKState& RightFoot
