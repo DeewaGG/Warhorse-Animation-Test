@@ -79,7 +79,6 @@ static void SetAnimRot(UAnimInstance* Inst, FName PropName, const FRotator& Val)
 void UAnimBPNodes::SolveHandIK(
     FHandIKState& State,
     USkeletalMeshComponent* AttackerMesh,
-    FName HandBoneName,
     const TArray<FName>& ContactSockets,
     FVector HitLocation,
     AActor* VictimActor,
@@ -109,31 +108,29 @@ void UAnimBPNodes::SolveHandIK(
         if (DSq < MinDistSq) { MinDistSq = DSq; ClosestSocketWorld = SW; }
     }
 
-    // Rotación: pivot en el hueso de la mano
-    const FVector HandBoneWorld    = AttackerMesh->GetBoneLocation(HandBoneName);
-    const FVector CurrentSocketDir = (ClosestSocketWorld - HandBoneWorld).GetSafeNormal();
-    const FVector DesiredDir       = (TargetBoneWorld    - HandBoneWorld).GetSafeNormal();
+    // Rotación: pivot en el origen del componente
+    const FVector PivotWorld       = AttackerMesh->GetComponentLocation();
+    const FVector CurrentSocketDir = (ClosestSocketWorld - PivotWorld).GetSafeNormal();
+    const FVector DesiredDir       = (TargetBoneWorld    - PivotWorld).GetSafeNormal();
     const FQuat   DeltaQuat        = FQuat::FindBetweenVectors(CurrentSocketDir, DesiredDir);
     const FRotator FinalRotation   = DeltaQuat.Rotator();
 
-    AActor*          AttackerOwner  = AttackerMesh->GetOwner();
-    const FTransform PivotTransform = AttackerOwner
-        ? AttackerOwner->GetActorTransform()
-        : AttackerMesh->GetComponentTransform();
-    const FQuat CompWorldQuat = AttackerMesh->GetComponentTransform().GetRotation();
+    AActor*       AttackerOwner  = AttackerMesh->GetOwner();
+    const FQuat   CompWorldQuat  = AttackerMesh->GetComponentTransform().GetRotation();
 
     // Delta de rotación expresado en component space del mesh (lo que espera el AnimBP)
     const FQuat DeltaComp = CompWorldQuat.Inverse() * DeltaQuat * CompWorldQuat;
 
     State.Mesh                      = AttackerMesh;
     State.AttackerActor             = AttackerOwner;
-    State.HandBoneName              = HandBoneName;
-    State.GoalPropertyName          = DomIKLoc;
-    State.RotationPropertyName      = DomIKRot;
-    State.StartHandGoalLocal        = PivotTransform.InverseTransformPosition(HandBoneWorld);
-    State.FinalHandGoalLocal        = PivotTransform.InverseTransformPosition(HandBoneWorld);
-    State.StartHandRotLocal         = FRotator::ZeroRotator;    // sin delta al inicio
-    State.FinalHandRotLocal         = DeltaComp.Rotator();      // delta completo al final
+    State.DomIKLoc                  = DomIKLoc;
+    State.DomIKRot                  = DomIKRot;
+    State.SlaveIKLoc                = SlaveIKLoc;
+    State.SlaveIKRot                = SlaveIKRot;
+    State.StartHandGoalLocal        = FVector::ZeroVector;
+    State.FinalHandGoalLocal        = FVector::ZeroVector;
+    State.StartHandRotLocal         = FRotator::ZeroRotator;
+    State.FinalHandRotLocal         = DeltaComp.Rotator();
     State.LastPosDelta              = FVector::ZeroVector;
     State.LastRotDelta              = FRotator::ZeroRotator;
     State.Duration                  = Duration;
@@ -141,8 +138,6 @@ void UAnimBPNodes::SolveHandIK(
     State.FramesRemaining           = 0;
     State.bActive                   = true;
     State.bHasSlave                 = (SlaveIKLoc != NAME_None || SlaveIKRot != NAME_None);
-    State.SlaveGoalPropertyName     = SlaveIKLoc;
-    State.SlaveRotationPropertyName = SlaveIKRot;
     State.VictimActor               = VictimActor;
     State.VictimBoneName            = TargetBoneName;
 
@@ -203,44 +198,16 @@ void UAnimBPNodes::TickHandIK(FHandIKState& State, float DeltaTime)
     const float Alpha = FMath::Clamp(
         1.f - (float)State.FramesRemaining / (float)State.TotalFrames, 0.f, 1.f);
 
-    const FTransform PivotTransform = State.AttackerActor
-        ? State.AttackerActor->GetActorTransform()
-        : State.Mesh->GetComponentTransform();
-
-    const FTransform CompToWorld = State.Mesh->GetComponentTransform();
-
-    // ── POSICIÓN ──────────────────────────────────────────────────────────
-    FVector TargetPosWorld;
-    if (State.VictimActor)
-    {
-        USkeletalMeshComponent* VictimMesh = State.VictimActor->FindComponentByClass<USkeletalMeshComponent>();
-        const FVector FinalPosWorld = (VictimMesh && State.VictimBoneName != NAME_None)
-            ? VictimMesh->GetBoneLocation(State.VictimBoneName)
-            : State.VictimActor->GetActorLocation();
-        const FVector StartPosWorld = PivotTransform.TransformPosition(State.StartHandGoalLocal);
-        TargetPosWorld = FMath::Lerp(StartPosWorld, FinalPosWorld, Alpha);
-    }
-    else
-    {
-        const FVector LocalGoal = FMath::Lerp(State.StartHandGoalLocal, State.FinalHandGoalLocal, Alpha);
-        TargetPosWorld = PivotTransform.TransformPosition(LocalGoal);
-    }
-
-    const FVector CurBoneWorld    = State.Mesh->GetBoneLocation(State.HandBoneName);
-    const FVector BaseAnimWorld   = CurBoneWorld - CompToWorld.TransformVector(State.LastPosDelta);
-    const FVector NewPosDeltaComp = CompToWorld.InverseTransformVector(TargetPosWorld - BaseAnimWorld);
-    State.LastPosDelta = NewPosDeltaComp;
-
     // ── ROTACIÓN ──────────────────────────────────────────────────────────
     const FQuat RotDelta = FQuat::Slerp(FQuat::Identity, FQuat(State.FinalHandRotLocal), Alpha);
 
-    SetAnimVec(AnimInst, State.GoalPropertyName,     NewPosDeltaComp);
-    SetAnimRot(AnimInst, State.RotationPropertyName, RotDelta.Rotator());
+    SetAnimVec(AnimInst, State.DomIKLoc, FVector::ZeroVector);
+    SetAnimRot(AnimInst, State.DomIKRot, RotDelta.Rotator());
 
     if (State.bHasSlave)
     {
-        SetAnimVec(AnimInst, State.SlaveGoalPropertyName,     NewPosDeltaComp);
-        SetAnimRot(AnimInst, State.SlaveRotationPropertyName, RotDelta.Rotator());
+        SetAnimVec(AnimInst, State.SlaveIKLoc, FVector::ZeroVector);
+        SetAnimRot(AnimInst, State.SlaveIKRot, RotDelta.Rotator());
     }
 }
 

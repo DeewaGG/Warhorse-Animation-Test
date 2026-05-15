@@ -121,6 +121,18 @@ struct FHandIKState
     UPROPERTY(BlueprintReadWrite, Category = "HandIK")
     FName RotationPropertyName;
 
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Dom")
+    FName DomIKLoc;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Dom")
+    FName DomIKRot;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Dom")
+    FName SlaveIKLoc;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Dom")
+    FName SlaveIKRot;
+
     UPROPERTY(BlueprintReadWrite, Category = "HandIK")
     FVector StartHandGoalLocal = FVector::ZeroVector;
 
@@ -200,7 +212,6 @@ public:
     static void SolveHandIK(
         UPARAM(ref) FHandIKState& State,
         USkeletalMeshComponent* AttackerMesh,
-        FName HandBoneName,
         const TArray<FName>& ContactSockets,
         FVector HitLocation,
         AActor* VictimActor,
