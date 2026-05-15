@@ -1,6 +1,7 @@
 #include "AnimBPNodes.h"
 #include "Curves/CurveFloat.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/SkeletalMeshSocket.h"
 #include "GameFramework/Actor.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -79,7 +80,6 @@ static void SetAnimRot(UAnimInstance* Inst, FName PropName, const FRotator& Val)
 void UAnimBPNodes::SolveHandIK(
     FHandIKState& State,
     USkeletalMeshComponent* AttackerMesh,
-    FName HandBoneName,
     const TArray<FName>& ContactSockets,
     FVector HitLocation,
     AActor* VictimActor,
@@ -100,19 +100,25 @@ void UAnimBPNodes::SolveHandIK(
     const FVector TargetBoneWorld = VictimMesh ? VictimMesh->GetBoneLocation(TargetBoneName) : HitLocation;
 
     // Socket más cercano al hit point
+    FName   ClosestSocketName  = ContactSockets[0];
     FVector ClosestSocketWorld = AttackerMesh->GetSocketLocation(ContactSockets[0]);
     float   MinDistSq          = FVector::DistSquared(HitLocation, ClosestSocketWorld);
     for (int32 i = 1; i < ContactSockets.Num(); ++i)
     {
         const FVector SW  = AttackerMesh->GetSocketLocation(ContactSockets[i]);
         const float   DSq = FVector::DistSquared(HitLocation, SW);
-        if (DSq < MinDistSq) { MinDistSq = DSq; ClosestSocketWorld = SW; }
+        if (DSq < MinDistSq) { MinDistSq = DSq; ClosestSocketWorld = SW; ClosestSocketName = ContactSockets[i]; }
     }
 
-    // Rotación: pivot en el hueso de la mano
-    const FVector HandBoneWorld    = AttackerMesh->GetBoneLocation(HandBoneName);
-    const FVector CurrentSocketDir = (ClosestSocketWorld - HandBoneWorld).GetSafeNormal();
-    const FVector DesiredDir       = (TargetBoneWorld    - HandBoneWorld).GetSafeNormal();
+    // Pivot: hueso padre del socket — mismo cálculo que HandBone pero sin parámetro
+    const USkeletalMeshSocket* Sock       = AttackerMesh->GetSocketByName(ClosestSocketName);
+    const FName                PivotBone  = Sock ? Sock->BoneName : NAME_None;
+    const FVector              PivotWorld = (PivotBone != NAME_None)
+        ? AttackerMesh->GetBoneLocation(PivotBone)
+        : AttackerMesh->GetComponentLocation();
+
+    const FVector CurrentSocketDir = (ClosestSocketWorld - PivotWorld).GetSafeNormal();
+    const FVector DesiredDir       = (TargetBoneWorld    - PivotWorld).GetSafeNormal();
     const FQuat   DeltaQuat        = FQuat::FindBetweenVectors(CurrentSocketDir, DesiredDir);
     const FRotator FinalRotation   = DeltaQuat.Rotator();
 
@@ -127,11 +133,11 @@ void UAnimBPNodes::SolveHandIK(
 
     State.Mesh                      = AttackerMesh;
     State.AttackerActor             = AttackerOwner;
-    State.HandBoneName              = HandBoneName;
+    State.HandBoneName              = PivotBone;
     State.GoalPropertyName          = DomIKLoc;
     State.RotationPropertyName      = DomIKRot;
-    State.StartHandGoalLocal        = PivotTransform.InverseTransformPosition(HandBoneWorld);
-    State.FinalHandGoalLocal        = PivotTransform.InverseTransformPosition(HandBoneWorld);
+    State.StartHandGoalLocal        = PivotTransform.InverseTransformPosition(PivotWorld);
+    State.FinalHandGoalLocal        = PivotTransform.InverseTransformPosition(PivotWorld);
     State.StartHandRotLocal         = FRotator::ZeroRotator;    // sin delta al inicio
     State.FinalHandRotLocal         = DeltaComp.Rotator();      // delta completo al final
     State.LastPosDelta              = FVector::ZeroVector;

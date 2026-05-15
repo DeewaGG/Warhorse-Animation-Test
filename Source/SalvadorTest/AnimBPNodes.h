@@ -200,7 +200,6 @@ public:
     static void SolveHandIK(
         UPARAM(ref) FHandIKState& State,
         USkeletalMeshComponent* AttackerMesh,
-        FName HandBoneName,
         const TArray<FName>& ContactSockets,
         FVector HitLocation,
         AActor* VictimActor,
