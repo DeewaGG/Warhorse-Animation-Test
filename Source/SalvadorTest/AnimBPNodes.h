@@ -121,6 +121,18 @@ struct FHandIKState
     UPROPERTY(BlueprintReadWrite, Category = "HandIK")
     FName RotationPropertyName;
 
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Dom")
+    FName DomIKLoc;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Dom")
+    FName DomIKRot;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Dom")
+    FName SlaveIKLoc;
+
+    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Dom")
+    FName SlaveIKRot;
+
     UPROPERTY(BlueprintReadWrite, Category = "HandIK")
     FVector StartHandGoalLocal = FVector::ZeroVector;
 
