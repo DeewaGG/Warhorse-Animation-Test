@@ -344,47 +344,12 @@ void UAnimBPNodes::ThrustRecover(
     UAnimInstance* AnimInst = State.AttackerMesh->GetAnimInstance();
     if (!AnimInst) return;
 
-    // ── Phase 2: montage reversing ───────────────────────────────────────────
-    if (State.bMontageReversing)
-    {
-        const float Pos = State.Montage
-            ? AnimInst->Montage_GetPosition(State.Montage)
-            : 0.f;
-
-        if (Pos <= KINDA_SMALL_NUMBER)
-        {
-            if (State.Montage)
-                AnimInst->Montage_SetPlayRate(State.Montage, 0.f);
-            bOutComplete = true;
-        }
-        return;
-    }
-
-    // ── Phase 1: IK lerp back to rest ────────────────────────────────────────
+    // ── Init: IK lerp + montage backward start at the same time ─────────────
     if (!State.bRecovering)
     {
         State.bRecovering            = true;
         State.RecoverDomStartRotCS   = GetAnimRot(AnimInst, State.DomRotGoal);
         State.RecoverSlaveStartRotCS = GetAnimRot(AnimInst, State.SlaveRotGoal);
-        State.RecoverFramesTotal     = FMath::Max(1, FMath::RoundToInt(State.RecoverDuration / DeltaTime));
-        State.RecoverFramesRemaining = State.RecoverFramesTotal;
-    }
-
-    const int32 CurrentFrame = State.RecoverFramesTotal - State.RecoverFramesRemaining + 1;
-    const float Alpha = FMath::Clamp(float(CurrentFrame) / float(State.RecoverFramesTotal), 0.f, 1.f);
-
-    const FRotator DomRotCS   = FQuat::Slerp(State.RecoverDomStartRotCS.Quaternion(),   State.DomRestRot.Quaternion(),   Alpha).Rotator();
-    const FRotator SlaveRotCS = FQuat::Slerp(State.RecoverSlaveStartRotCS.Quaternion(), State.SlaveRestRot.Quaternion(), Alpha).Rotator();
-
-    SetAnimVec(AnimInst, State.DomLocGoal,   State.DomRestPos);
-    SetAnimRot(AnimInst, State.DomRotGoal,   DomRotCS);
-    SetAnimVec(AnimInst, State.SlaveLocGoal, State.SlaveRestPos);
-    SetAnimRot(AnimInst, State.SlaveRotGoal, SlaveRotCS);
-
-    --State.RecoverFramesRemaining;
-    if (State.RecoverFramesRemaining <= 0)
-    {
-        State.RecoverFramesRemaining = 0;
 
         if (State.Montage)
         {
@@ -399,15 +364,56 @@ void UAnimBPNodes::ThrustRecover(
                 AnimInst->Montage_Play(State.Montage, -1.f,
                     EMontagePlayReturnType::MontageLength, StartPos, true);
             }
-            else
-            {
-                bOutComplete = true;
-            }
+        }
+
+        if (!State.bMontageReversing)
+        {
+            State.RecoverFramesTotal     = FMath::Max(1, FMath::RoundToInt(State.RecoverDuration / DeltaTime));
+            State.RecoverFramesRemaining = State.RecoverFramesTotal;
+        }
+    }
+
+    // ── Alpha ────────────────────────────────────────────────────────────────
+    float Alpha = 0.f;
+    bool  bDone = false;
+
+    if (State.bMontageReversing)
+    {
+        const float CurPos = AnimInst->Montage_GetPosition(State.Montage);
+        if (CurPos <= KINDA_SMALL_NUMBER)
+        {
+            AnimInst->Montage_SetPlayRate(State.Montage, 0.f);
+            bDone = true;
         }
         else
         {
-            bOutComplete = true;
+            Alpha = CurPos / State.MontagePos;
         }
+    }
+    else
+    {
+        --State.RecoverFramesRemaining;
+        if (State.RecoverFramesRemaining <= 0)
+            bDone = true;
+        else
+            Alpha = float(State.RecoverFramesRemaining) / float(State.RecoverFramesTotal);
+    }
+
+    // ── IK lerp ───────────────────────────────────────────────────────────────
+    SetAnimVec(AnimInst, State.DomLocGoal,   State.DomRestPos);
+    SetAnimRot(AnimInst, State.DomRotGoal,
+        FQuat::Slerp(State.RecoverDomStartRotCS.Quaternion(), State.DomRestRot.Quaternion(), Alpha).Rotator());
+    SetAnimVec(AnimInst, State.SlaveLocGoal, State.SlaveRestPos);
+    SetAnimRot(AnimInst, State.SlaveRotGoal,
+        FQuat::Slerp(State.RecoverSlaveStartRotCS.Quaternion(), State.SlaveRestRot.Quaternion(), Alpha).Rotator());
+
+    if (bDone)
+    {
+        SetAnimVec(AnimInst, State.DomLocGoal,   State.DomRestPos);
+        SetAnimRot(AnimInst, State.DomRotGoal,   State.DomRestRot);
+        SetAnimVec(AnimInst, State.SlaveLocGoal, State.SlaveRestPos);
+        SetAnimRot(AnimInst, State.SlaveRotGoal, State.SlaveRestRot);
+        bOutComplete = true;
     }
 }
 
