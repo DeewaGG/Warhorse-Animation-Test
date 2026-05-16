@@ -3,15 +3,48 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/SkeletalMeshSocket.h"
 #include "GameFramework/Actor.h"
-#include "Misc/FileHelper.h"
-#include "Misc/Paths.h"
+#include "GameFramework/Character.h"
 
-DEFINE_LOG_CATEGORY(LogSwordIK);
+// ─────────────────────────────────────────────
+// ANIM INSTANCE PROPERTY HELPERS
+// ─────────────────────────────────────────────
 
-static void WriteIKLog(const FString& Text)
+static void SetAnimVec(UAnimInstance* Inst, FName PropName, const FVector& Val)
 {
-    const FString Path = FPaths::ProjectDir() / TEXT("SwordIKDebug.log");
-    FFileHelper::SaveStringToFile(Text, *Path);
+    if (!Inst || PropName == NAME_None) return;
+    if (FProperty* P = Inst->GetClass()->FindPropertyByName(PropName))
+        if (FStructProperty* SP = CastField<FStructProperty>(P))
+            if (SP->Struct == TBaseStructure<FVector>::Get())
+                *SP->ContainerPtrToValuePtr<FVector>(Inst) = Val;
+}
+
+static void SetAnimRot(UAnimInstance* Inst, FName PropName, const FRotator& Val)
+{
+    if (!Inst || PropName == NAME_None) return;
+    if (FProperty* P = Inst->GetClass()->FindPropertyByName(PropName))
+        if (FStructProperty* SP = CastField<FStructProperty>(P))
+            if (SP->Struct == TBaseStructure<FRotator>::Get())
+                *SP->ContainerPtrToValuePtr<FRotator>(Inst) = Val;
+}
+
+static FVector GetAnimVec(UAnimInstance* Inst, FName PropName)
+{
+    if (!Inst || PropName == NAME_None) return FVector::ZeroVector;
+    if (FProperty* P = Inst->GetClass()->FindPropertyByName(PropName))
+        if (FStructProperty* SP = CastField<FStructProperty>(P))
+            if (SP->Struct == TBaseStructure<FVector>::Get())
+                return *SP->ContainerPtrToValuePtr<FVector>(Inst);
+    return FVector::ZeroVector;
+}
+
+static FRotator GetAnimRot(UAnimInstance* Inst, FName PropName)
+{
+    if (!Inst || PropName == NAME_None) return FRotator::ZeroRotator;
+    if (FProperty* P = Inst->GetClass()->FindPropertyByName(PropName))
+        if (FStructProperty* SP = CastField<FStructProperty>(P))
+            if (SP->Struct == TBaseStructure<FRotator>::Get())
+                return *SP->ContainerPtrToValuePtr<FRotator>(Inst);
+    return FRotator::ZeroRotator;
 }
 
 static float RandFromRange(FVector2D Range)
@@ -55,199 +88,343 @@ void UAnimBPNodes::SampleCurve(
 }
 
 // ─────────────────────────────────────────────
-// SWORD CONTACT IK
+// THRUST SYSTEM
 // ─────────────────────────────────────────────
 
-// Helper: escribe un FVector o FRotator en una variable del AnimBP por nombre
-static void SetAnimVec(UAnimInstance* Inst, FName PropName, const FVector& Val)
-{
-    if (!Inst || PropName == NAME_None) return;
-    if (FProperty* P = Inst->GetClass()->FindPropertyByName(PropName))
-        if (FStructProperty* SP = CastField<FStructProperty>(P))
-            if (SP->Struct == TBaseStructure<FVector>::Get())
-                *SP->ContainerPtrToValuePtr<FVector>(Inst) = Val;
-}
-
-static void SetAnimRot(UAnimInstance* Inst, FName PropName, const FRotator& Val)
-{
-    if (!Inst || PropName == NAME_None) return;
-    if (FProperty* P = Inst->GetClass()->FindPropertyByName(PropName))
-        if (FStructProperty* SP = CastField<FStructProperty>(P))
-            if (SP->Struct == TBaseStructure<FRotator>::Get())
-                *SP->ContainerPtrToValuePtr<FRotator>(Inst) = Val;
-}
-
-void UAnimBPNodes::SolveHandIK(
-    FHandIKState& State,
-    USkeletalMeshComponent* AttackerMesh,
+void UAnimBPNodes::ThrustSetUp(
+    FThrustState& State,
+    AActor* AttackerActor,
+    AActor* VictimActor,
+    FName DomLocGoal,
+    FName DomRotGoal,
+    FName SlaveLocGoal,
+    FName SlaveRotGoal,
     const TArray<FName>& ContactSockets,
     FVector HitLocation,
-    AActor* VictimActor,
     FName TargetBoneName,
-    FName DomIKLoc,
-    FName DomIKRot,
-    FName SlaveIKLoc,
-    FName SlaveIKRot,
-    float Duration)
+    float HitReachDelay,
+    float PlantDuration,
+    UAnimMontage* Montage,
+    float MontageCurrentPos,
+    float RecoverDuration,
+    bool bDebug)
 {
-    if (!AttackerMesh || ContactSockets.Num() == 0 || Duration <= 0.f)
+    if (!AttackerActor || ContactSockets.Num() == 0 || HitReachDelay <= 0.f)
         return;
+
+    USkeletalMeshComponent* AttackerMesh = nullptr;
+    if (ACharacter* Char = Cast<ACharacter>(AttackerActor))
+        AttackerMesh = Char->GetMesh();
+    if (!AttackerMesh)
+        AttackerMesh = AttackerActor->FindComponentByClass<USkeletalMeshComponent>();
+    if (!AttackerMesh) return;
+
+    UAnimInstance* AnimInst = AttackerMesh->GetAnimInstance();
+    if (!AnimInst) return;
 
     USkeletalMeshComponent* VictimMesh = VictimActor
         ? VictimActor->FindComponentByClass<USkeletalMeshComponent>()
         : nullptr;
 
-    const FVector TargetBoneWorld = VictimMesh ? VictimMesh->GetBoneLocation(TargetBoneName) : HitLocation;
+    // Target world position
+    const FVector TargetWorld = (VictimMesh && TargetBoneName != NAME_None)
+        ? VictimMesh->GetBoneLocation(TargetBoneName)
+        : HitLocation;
 
-    // Socket más cercano al hit point
-    FName   ClosestSocketName  = ContactSockets[0];
+    // Closest contact socket to hit location
+    FName   ClosestSocket      = ContactSockets[0];
     FVector ClosestSocketWorld = AttackerMesh->GetSocketLocation(ContactSockets[0]);
     float   MinDistSq          = FVector::DistSquared(HitLocation, ClosestSocketWorld);
     for (int32 i = 1; i < ContactSockets.Num(); ++i)
     {
         const FVector SW  = AttackerMesh->GetSocketLocation(ContactSockets[i]);
         const float   DSq = FVector::DistSquared(HitLocation, SW);
-        if (DSq < MinDistSq) { MinDistSq = DSq; ClosestSocketWorld = SW; ClosestSocketName = ContactSockets[i]; }
+        if (DSq < MinDistSq) { MinDistSq = DSq; ClosestSocketWorld = SW; ClosestSocket = ContactSockets[i]; }
     }
 
-    // Pivot: hueso padre del socket — mismo cálculo que HandBone pero sin parámetro
-    const USkeletalMeshSocket* Sock       = AttackerMesh->GetSocketByName(ClosestSocketName);
-    const FName                PivotBone  = Sock ? Sock->BoneName : NAME_None;
+    // Pivot bone = parent bone of closest socket
+    const USkeletalMeshSocket* Sock      = AttackerMesh->GetSocketByName(ClosestSocket);
+    const FName                PivotBone = Sock ? Sock->BoneName : NAME_None;
     const FVector              PivotWorld = (PivotBone != NAME_None)
         ? AttackerMesh->GetBoneLocation(PivotBone)
         : AttackerMesh->GetComponentLocation();
 
-    const FVector CurrentSocketDir = (ClosestSocketWorld - PivotWorld).GetSafeNormal();
-    const FVector DesiredDir       = (TargetBoneWorld    - PivotWorld).GetSafeNormal();
-    const FQuat   DeltaQuat        = FQuat::FindBetweenVectors(CurrentSocketDir, DesiredDir);
-    const FRotator FinalRotation   = DeltaQuat.Rotator();
+    // Read A-pose defaults from ABP — goals must be at rest when ThrustSetUp is called
+    State.DomRestPos   = GetAnimVec(AnimInst, DomLocGoal);
+    State.DomRestRot   = GetAnimRot(AnimInst, DomRotGoal);
+    State.SlaveRestPos = GetAnimVec(AnimInst, SlaveLocGoal);
+    State.SlaveRestRot = GetAnimRot(AnimInst, SlaveRotGoal);
 
-    AActor*          AttackerOwner  = AttackerMesh->GetOwner();
-    const FTransform PivotTransform = AttackerOwner
-        ? AttackerOwner->GetActorTransform()
-        : AttackerMesh->GetComponentTransform();
+    // Rotation delta: current socket direction → target direction (world space)
+    const FVector CurrentDir = (ClosestSocketWorld - PivotWorld).GetSafeNormal();
+    const FVector TargetDir  = (TargetWorld         - PivotWorld).GetSafeNormal();
+    const FQuat   DeltaWorld = FQuat::FindBetweenVectors(CurrentDir, TargetDir);
+
+    // World delta → component space
     const FQuat CompWorldQuat = AttackerMesh->GetComponentTransform().GetRotation();
+    const FQuat DeltaCS       = CompWorldQuat.Inverse() * DeltaWorld * CompWorldQuat;
 
-    // Delta de rotación expresado en component space del mesh (lo que espera el AnimBP)
-    const FQuat DeltaComp = CompWorldQuat.Inverse() * DeltaQuat * CompWorldQuat;
+    // Start = hand_r's IK goal CS rotation (DomRestRot). Using weapon_r's bone CS rotation
+    // here would be wrong — the IK goal drives hand_r, not weapon_r.
+    const FQuat StartRotCS  = State.DomRestRot.Quaternion();
+    const FQuat TargetRotCS = DeltaCS * StartRotCS;
 
-    State.Mesh                      = AttackerMesh;
-    State.AttackerActor             = AttackerOwner;
-    State.HandBoneName              = PivotBone;
-    State.GoalPropertyName          = DomIKLoc;
-    State.RotationPropertyName      = DomIKRot;
-    State.StartHandGoalLocal        = PivotTransform.InverseTransformPosition(PivotWorld);
-    State.FinalHandGoalLocal        = PivotTransform.InverseTransformPosition(PivotWorld);
-    State.StartHandRotLocal         = FRotator::ZeroRotator;    // sin delta al inicio
-    State.FinalHandRotLocal         = DeltaComp.Rotator();      // delta completo al final
-    State.LastPosDelta              = FVector::ZeroVector;
-    State.LastRotDelta              = FRotator::ZeroRotator;
-    State.Duration                  = Duration;
-    State.TotalFrames               = 0;
-    State.FramesRemaining           = 0;
-    State.bActive                   = true;
-    State.bHasSlave                 = (SlaveIKLoc != NAME_None || SlaveIKRot != NAME_None);
-    State.SlaveGoalPropertyName     = SlaveIKLoc;
-    State.SlaveRotationPropertyName = SlaveIKRot;
-    State.VictimActor               = VictimActor;
-    State.VictimBoneName            = TargetBoneName;
+    // Fill state
+    State.AttackerMesh    = AttackerMesh;
+    State.VictimActor     = VictimActor;
+    State.DomLocGoal      = DomLocGoal;
+    State.DomRotGoal      = DomRotGoal;
+    State.SlaveLocGoal    = SlaveLocGoal;
+    State.SlaveRotGoal    = SlaveRotGoal;
+    State.PivotBone       = PivotBone;
+    State.TargetBone      = TargetBoneName;
+    State.TargetBoneWorld = TargetWorld;
+    State.DomStartRotCS   = StartRotCS.Rotator();
+    State.DomTargetRotCS  = TargetRotCS.Rotator();
+    State.HitReachDelay   = HitReachDelay;
+    State.PlantDuration   = PlantDuration;
+    State.PlantElapsed    = 0.f;
+    State.Montage         = Montage;
+    State.MontagePos      = MontageCurrentPos;
+    State.RecoverDuration = RecoverDuration;
+    State.TotalFrames     = 0;
+    State.FramesRemaining = 0;
+    State.bActive         = true;
+    State.bPlanted        = false;
+    State.PlantedRotCS    = FRotator::ZeroRotator;
+    State.bDebug          = bDebug;
 
-#if !UE_BUILD_SHIPPING
+    if (bDebug)
     {
         UWorld* World = AttackerMesh->GetWorld();
-        FString Log;
-        Log += TEXT("======= SolveHandIK =======\n");
-        Log += FString::Printf(TEXT("TargetBone  [%s]  (%.2f, %.2f, %.2f)\n"),
-            *TargetBoneName.ToString(), TargetBoneWorld.X, TargetBoneWorld.Y, TargetBoneWorld.Z);
-        for (int32 i = 0; i < ContactSockets.Num(); ++i)
-        {
-            const FVector SW = AttackerMesh->GetSocketLocation(ContactSockets[i]);
-            const bool bClosest = SW.Equals(ClosestSocketWorld, 0.1f);
-            Log += FString::Printf(TEXT("  Socket[%d] [%s]  dist=%.2f%s\n"),
-                i, *ContactSockets[i].ToString(), FVector::Dist(TargetBoneWorld, SW),
-                bClosest ? TEXT("  <-- CLOSEST") : TEXT(""));
-            if (World)
-                DrawDebugSphere(World, SW, 2.f, 8, bClosest ? FColor::Cyan : FColor::Red, false, 3.f);
-        }
-        Log += FString::Printf(TEXT("FinalRot  (P=%.2f Y=%.2f R=%.2f)  Duration=%.2fs  Slave=%s\n"),
-            FinalRotation.Pitch, FinalRotation.Yaw, FinalRotation.Roll,
-            Duration, State.bHasSlave ? TEXT("yes") : TEXT("no"));
-        WriteIKLog(Log);
         if (World)
         {
-            DrawDebugLine(World, ClosestSocketWorld, TargetBoneWorld, FColor::Yellow, false, 3.f, 0, 0.5f);
-            if (VictimMesh)
+            for (const FName& SocketName : ContactSockets)
             {
-                DrawDebugSphere(World, TargetBoneWorld, 4.f, 12, FColor::Black, false, 3.f);
-                DrawDebugBox   (World, TargetBoneWorld, FVector(5.f, 5.f, 100.f), FQuat::Identity, FColor::Black, false, 3.f);
+                const FVector SW     = AttackerMesh->GetSocketLocation(SocketName);
+                const bool    bClose = SocketName == ClosestSocket;
+                DrawDebugSphere(World, SW, 3.f, 8,
+                    bClose ? FColor::Cyan : FColor::Red, false, 4.f);
             }
+            DrawDebugSphere(World, PivotWorld,  5.f, 8,  FColor::Green, false, 4.f);
+            DrawDebugSphere(World, TargetWorld, 5.f, 12, FColor::Black, false, 4.f);
+            DrawDebugBox   (World, TargetWorld, FVector(4.f, 4.f, 50.f), FQuat::Identity, FColor::Black, false, 4.f);
+            DrawDebugLine  (World, ClosestSocketWorld, TargetWorld,            FColor::Yellow, false, 4.f, 0, 0.5f);
+            DrawDebugLine  (World, PivotWorld, PivotWorld + CurrentDir * 40.f, FColor::Red,    false, 4.f, 0, 0.5f);
+            DrawDebugLine  (World, PivotWorld, PivotWorld + TargetDir  * 40.f, FColor::Green,  false, 4.f, 0, 0.5f);
         }
     }
-#endif
 }
 
-void UAnimBPNodes::TickHandIK(FHandIKState& State, float DeltaTime)
+void UAnimBPNodes::ThrustTick(
+    FThrustState& State,
+    float DeltaTime,
+    bool& bOutComplete)
 {
-    if (!State.bActive || !State.Mesh)
-        return;
+    bOutComplete = false;
 
+    if (!State.bActive || !State.AttackerMesh) return;
+
+    UAnimInstance* AnimInst = State.AttackerMesh->GetAnimInstance();
+    if (!AnimInst) return;
+
+    // Initialize frame count on first tick
     if (State.TotalFrames == 0)
     {
-        State.TotalFrames     = FMath::Max(1, FMath::RoundToInt(State.Duration / DeltaTime));
+        State.TotalFrames     = FMath::Max(1, FMath::RoundToInt(State.HitReachDelay / DeltaTime));
         State.FramesRemaining = State.TotalFrames;
     }
 
-    UAnimInstance* AnimInst = State.Mesh->GetAnimInstance();
+    const int32 CurrentFrame = State.TotalFrames - State.FramesRemaining + 1;
+    const float Alpha        = FMath::Clamp(float(CurrentFrame) / float(State.TotalFrames), 0.f, 1.f);
 
-    State.FramesRemaining--;
+    const FQuat    StartQ    = State.DomStartRotCS.Quaternion();
+    const FQuat    TargetQ   = State.DomTargetRotCS.Quaternion();
+    const FRotator LerpedRot = FQuat::Slerp(StartQ, TargetQ, Alpha).Rotator();
+
+    SetAnimVec(AnimInst, State.DomLocGoal,   State.DomRestPos);
+    SetAnimRot(AnimInst, State.DomRotGoal,   LerpedRot);
+    SetAnimVec(AnimInst, State.SlaveLocGoal, State.SlaveRestPos);
+    SetAnimRot(AnimInst, State.SlaveRotGoal, State.SlaveRestRot);
+
+    --State.FramesRemaining;
     if (State.FramesRemaining <= 0)
     {
         State.FramesRemaining = 0;
+        bOutComplete          = true;
         State.bActive         = false;
+        State.bPlanted        = true;
+        State.PlantedRotCS    = State.DomTargetRotCS;
     }
 
-    const float Alpha = FMath::Clamp(
-        1.f - (float)State.FramesRemaining / (float)State.TotalFrames, 0.f, 1.f);
+}
 
-    const FTransform PivotTransform = State.AttackerActor
-        ? State.AttackerActor->GetActorTransform()
-        : State.Mesh->GetComponentTransform();
+void UAnimBPNodes::ThrustPlant(
+    FThrustState& State,
+    float DeltaTime,
+    bool& bOutComplete)
+{
+    bOutComplete = false;
+    if (!State.AttackerMesh) return;
 
-    const FTransform CompToWorld = State.Mesh->GetComponentTransform();
+    UAnimInstance* AnimInst = State.AttackerMesh->GetAnimInstance();
+    if (!AnimInst) return;
 
-    // ── POSICIÓN ──────────────────────────────────────────────────────────
-    FVector TargetPosWorld;
-    if (State.VictimActor)
+    const FTransform CompTW = State.AttackerMesh->GetComponentTransform();
+    const FQuat      CompQ  = CompTW.GetRotation();
+
+    USkeletalMeshComponent* VictimMesh = State.VictimActor
+        ? State.VictimActor->FindComponentByClass<USkeletalMeshComponent>()
+        : nullptr;
+
+    // First frame: lock all values into world space and capture victim bone state
+    if (State.FramesRemaining == 0)
     {
-        USkeletalMeshComponent* VictimMesh = State.VictimActor->FindComponentByClass<USkeletalMeshComponent>();
-        const FVector FinalPosWorld = (VictimMesh && State.VictimBoneName != NAME_None)
-            ? VictimMesh->GetBoneLocation(State.VictimBoneName)
-            : State.VictimActor->GetActorLocation();
-        const FVector StartPosWorld = PivotTransform.TransformPosition(State.StartHandGoalLocal);
-        TargetPosWorld = FMath::Lerp(StartPosWorld, FinalPosWorld, Alpha);
+        // CS → World:  W = CompQ * CS
+        State.PlantedDomHandWorld   = CompTW.TransformPosition(GetAnimVec(AnimInst, State.DomLocGoal));
+        State.PlantedDomRotWorld    = (CompQ * GetAnimRot(AnimInst, State.DomRotGoal).Quaternion()).Rotator();
+        State.PlantedSlaveHandWorld = CompTW.TransformPosition(GetAnimVec(AnimInst, State.SlaveLocGoal));
+        State.PlantedSlaveRotWorld  = (CompQ * GetAnimRot(AnimInst, State.SlaveRotGoal).Quaternion()).Rotator();
+
+        // Capture victim bone world state as the tracking origin
+        State.PlantedTargetBoneWorld = (VictimMesh && State.TargetBone != NAME_None)
+            ? VictimMesh->GetBoneLocation(State.TargetBone)
+            : State.PlantedDomHandWorld;
+
+        State.FramesRemaining = -1;
     }
-    else
+
+    // Compute current hand world position and rotation, tracking the victim bone
+    FVector CurrentDomHandWorld  = State.PlantedDomHandWorld;
+    FQuat   CurrentDomRotWorld   = State.PlantedDomRotWorld.Quaternion();
+
+    if (VictimMesh && State.TargetBone != NAME_None)
     {
-        const FVector LocalGoal = FMath::Lerp(State.StartHandGoalLocal, State.FinalHandGoalLocal, Alpha);
-        TargetPosWorld = PivotTransform.TransformPosition(LocalGoal);
+        const FVector CurrentBoneWorld = VictimMesh->GetBoneLocation(State.TargetBone);
+
+        // Position: only 10% of the victim's movement reaches the hand
+        CurrentDomHandWorld = State.PlantedDomHandWorld
+            + (CurrentBoneWorld - State.PlantedTargetBoneWorld) * 0.1f;
+
+        // Rotation: recompute full blade direction each frame so the remaining
+        // 90% of movement is absorbed by arm/wrist rotation
+        const FVector PlantedBladeDir = (State.PlantedTargetBoneWorld - State.PlantedDomHandWorld).GetSafeNormal();
+        const FVector CurrentBladeDir = (CurrentBoneWorld             - CurrentDomHandWorld).GetSafeNormal();
+        const FQuat   BladeRotDelta   = FQuat::FindBetweenVectors(PlantedBladeDir, CurrentBladeDir);
+        CurrentDomRotWorld            = BladeRotDelta * State.PlantedDomRotWorld.Quaternion();
     }
 
-    const FVector CurBoneWorld    = State.Mesh->GetBoneLocation(State.HandBoneName);
-    const FVector BaseAnimWorld   = CurBoneWorld - CompToWorld.TransformVector(State.LastPosDelta);
-    const FVector NewPosDeltaComp = CompToWorld.InverseTransformVector(TargetPosWorld - BaseAnimWorld);
-    State.LastPosDelta = NewPosDeltaComp;
+    // World → CS:  CS = CompQ.Inv * W
+    SetAnimVec(AnimInst, State.DomLocGoal,
+        CompTW.InverseTransformPosition(CurrentDomHandWorld));
+    SetAnimRot(AnimInst, State.DomRotGoal,
+        (CompQ.Inverse() * CurrentDomRotWorld).Rotator());
+    SetAnimVec(AnimInst, State.SlaveLocGoal,
+        CompTW.InverseTransformPosition(State.PlantedSlaveHandWorld));
+    SetAnimRot(AnimInst, State.SlaveRotGoal,
+        (CompQ.Inverse() * State.PlantedSlaveRotWorld.Quaternion()).Rotator());
 
-    // ── ROTACIÓN ──────────────────────────────────────────────────────────
-    const FQuat RotDelta = FQuat::Slerp(FQuat::Identity, FQuat(State.FinalHandRotLocal), Alpha);
-
-    SetAnimVec(AnimInst, State.GoalPropertyName,     NewPosDeltaComp);
-    SetAnimRot(AnimInst, State.RotationPropertyName, RotDelta.Rotator());
-
-    if (State.bHasSlave)
+    // PlantDuration timer — 0 means infinite
+    if (State.PlantDuration > 0.f)
     {
-        SetAnimVec(AnimInst, State.SlaveGoalPropertyName,     NewPosDeltaComp);
-        SetAnimRot(AnimInst, State.SlaveRotationPropertyName, RotDelta.Rotator());
+        State.PlantElapsed += DeltaTime;
+        if (State.PlantElapsed >= State.PlantDuration)
+            bOutComplete = true;
     }
+}
+
+void UAnimBPNodes::ThrustRecover(
+    FThrustState& State,
+    float DeltaTime,
+    bool& bOutComplete)
+{
+    bOutComplete = false;
+    if (!State.AttackerMesh) return;
+
+    UAnimInstance* AnimInst = State.AttackerMesh->GetAnimInstance();
+    if (!AnimInst) return;
+
+    // ── Phase 2: montage reversing ───────────────────────────────────────────
+    if (State.bMontageReversing)
+    {
+        const float Pos = State.Montage
+            ? AnimInst->Montage_GetPosition(State.Montage)
+            : 0.f;
+
+        if (Pos <= KINDA_SMALL_NUMBER)
+        {
+            if (State.Montage)
+                AnimInst->Montage_SetPlayRate(State.Montage, 0.f);
+            bOutComplete = true;
+        }
+        return;
+    }
+
+    // ── Phase 1: IK lerp back to rest ────────────────────────────────────────
+    if (!State.bRecovering)
+    {
+        State.bRecovering            = true;
+        State.RecoverDomStartRotCS   = GetAnimRot(AnimInst, State.DomRotGoal);
+        State.RecoverSlaveStartRotCS = GetAnimRot(AnimInst, State.SlaveRotGoal);
+        State.RecoverFramesTotal     = FMath::Max(1, FMath::RoundToInt(State.RecoverDuration / DeltaTime));
+        State.RecoverFramesRemaining = State.RecoverFramesTotal;
+    }
+
+    const int32 CurrentFrame = State.RecoverFramesTotal - State.RecoverFramesRemaining + 1;
+    const float Alpha = FMath::Clamp(float(CurrentFrame) / float(State.RecoverFramesTotal), 0.f, 1.f);
+
+    const FRotator DomRotCS   = FQuat::Slerp(State.RecoverDomStartRotCS.Quaternion(),   State.DomRestRot.Quaternion(),   Alpha).Rotator();
+    const FRotator SlaveRotCS = FQuat::Slerp(State.RecoverSlaveStartRotCS.Quaternion(), State.SlaveRestRot.Quaternion(), Alpha).Rotator();
+
+    SetAnimVec(AnimInst, State.DomLocGoal,   State.DomRestPos);
+    SetAnimRot(AnimInst, State.DomRotGoal,   DomRotCS);
+    SetAnimVec(AnimInst, State.SlaveLocGoal, State.SlaveRestPos);
+    SetAnimRot(AnimInst, State.SlaveRotGoal, SlaveRotCS);
+
+    --State.RecoverFramesRemaining;
+    if (State.RecoverFramesRemaining <= 0)
+    {
+        State.RecoverFramesRemaining = 0;
+
+        if (State.Montage)
+        {
+            const float StartPos = State.MontagePos > KINDA_SMALL_NUMBER
+                ? State.MontagePos
+                : State.Montage->GetPlayLength();
+
+            if (StartPos > KINDA_SMALL_NUMBER)
+            {
+                State.MontagePos        = StartPos;
+                State.bMontageReversing = true;
+                AnimInst->Montage_Play(State.Montage, -1.f,
+                    EMontagePlayReturnType::MontageLength, StartPos, true);
+            }
+            else
+            {
+                bOutComplete = true;
+            }
+        }
+        else
+        {
+            bOutComplete = true;
+        }
+    }
+}
+
+void UAnimBPNodes::ThrustEnd(FThrustState& State)
+{
+    if (!State.AttackerMesh) return;
+
+    UAnimInstance* AnimInst = State.AttackerMesh->GetAnimInstance();
+    if (AnimInst)
+    {
+        SetAnimVec(AnimInst, State.DomLocGoal,   State.DomRestPos);
+        SetAnimRot(AnimInst, State.DomRotGoal,   State.DomRestRot);
+        SetAnimVec(AnimInst, State.SlaveLocGoal, State.SlaveRestPos);
+        SetAnimRot(AnimInst, State.SlaveRotGoal, State.SlaveRestRot);
+    }
+
+    State = FThrustState();
 }
 
 // ─────────────────────────────────────────────
@@ -286,10 +463,10 @@ void UAnimBPNodes::SetupFootIK(
     Foot.StrideElapsed = 0.f;
     Foot.CooldownTimer = 0.f;
 
-    Foot.ActiveDuration = RandFromRange(StrideDuration);
-    Foot.ActiveHeight = RandFromRange(StrideHeight);
-    Foot.ActiveReach = RandFromRange(StrideReach);
-    Foot.ActiveCooldown = RandFromRange(StrideCooldown);
+    Foot.ActiveDuration  = RandFromRange(StrideDuration);
+    Foot.ActiveHeight    = RandFromRange(StrideHeight);
+    Foot.ActiveReach     = RandFromRange(StrideReach);
+    Foot.ActiveCooldown  = RandFromRange(StrideCooldown);
     Foot.ActiveThreshold = RandFromRange(StrideThreshold);
 }
 
@@ -311,10 +488,10 @@ void UAnimBPNodes::SolveFoot(
         float SafeDuration = FMath::Max(Foot.ActiveDuration, 0.01f);
         float Alpha = FMath::Clamp(Foot.StrideElapsed / SafeDuration, 0.f, 1.f);
 
-        FVector2D StartXY = FVector2D(Foot.StrideStartGoal.X, Foot.StrideStartGoal.Y);
-        FVector2D NeutralXY = FVector2D(Foot.NeutralGoal.X, Foot.NeutralGoal.Y);
+        FVector2D StartXY   = FVector2D(Foot.StrideStartGoal.X, Foot.StrideStartGoal.Y);
+        FVector2D NeutralXY = FVector2D(Foot.NeutralGoal.X,     Foot.NeutralGoal.Y);
         FVector2D StrideDir = (NeutralXY - StartXY).GetSafeNormal();
-        FVector2D TargetXY = NeutralXY + StrideDir * Foot.ActiveReach;
+        FVector2D TargetXY  = NeutralXY + StrideDir * Foot.ActiveReach;
         FVector2D CurrentXY = FMath::Lerp(StartXY, TargetXY, Alpha);
 
         OutGoal = FVector(
@@ -326,15 +503,15 @@ void UAnimBPNodes::SolveFoot(
         if (Alpha >= 1.f)
         {
             Foot.AnchorWorldPos = ActorWorldPos;
-            Foot.AnchorGoal = FVector(TargetXY.X, TargetXY.Y, Foot.NeutralGoal.Z);
-            Foot.bAnchored = true;
-            Foot.bStriding = false;
-            Foot.CooldownTimer = Foot.ActiveCooldown;
+            Foot.AnchorGoal     = FVector(TargetXY.X, TargetXY.Y, Foot.NeutralGoal.Z);
+            Foot.bAnchored      = true;
+            Foot.bStriding      = false;
+            Foot.CooldownTimer  = Foot.ActiveCooldown;
 
-            Foot.ActiveDuration = RandFromRange(Foot.StrideDuration);
-            Foot.ActiveHeight = RandFromRange(Foot.StrideHeight);
-            Foot.ActiveReach = RandFromRange(Foot.StrideReach);
-            Foot.ActiveCooldown = RandFromRange(Foot.StrideCooldown);
+            Foot.ActiveDuration  = RandFromRange(Foot.StrideDuration);
+            Foot.ActiveHeight    = RandFromRange(Foot.StrideHeight);
+            Foot.ActiveReach     = RandFromRange(Foot.StrideReach);
+            Foot.ActiveCooldown  = RandFromRange(Foot.StrideCooldown);
             Foot.ActiveThreshold = RandFromRange(Foot.StrideThreshold);
         }
     }
@@ -365,9 +542,9 @@ void UAnimBPNodes::SolveFoot(
             if (Foot.bForceStride || DistToHip > Foot.ActiveThreshold)
             {
                 Foot.StrideStartGoal = OutGoal;
-                Foot.StrideElapsed = 0.f;
-                Foot.bStriding = true;
-                Foot.bForceStride = false;
+                Foot.StrideElapsed   = 0.f;
+                Foot.bStriding       = true;
+                Foot.bForceStride    = false;
             }
         }
     }
@@ -382,36 +559,31 @@ void UAnimBPNodes::SolveFootIK(
     FVector& OutLeftGoal,
     FVector& OutRightGoal)
 {
-    OutLeftGoal = LeftFoot.AnchorGoal;
+    OutLeftGoal  = LeftFoot.AnchorGoal;
     OutRightGoal = RightFoot.AnchorGoal;
 
     if (!LeftFoot.Mesh)
         return;
 
-    FVector LeftBoneWorld = LeftFoot.Mesh->GetBoneLocation(LeftFoot.FootBone);
+    FVector LeftBoneWorld  = LeftFoot.Mesh->GetBoneLocation(LeftFoot.FootBone);
     FVector RightBoneWorld = RightFoot.Mesh->GetBoneLocation(RightFoot.FootBone);
-    FVector HipBoneWorld = LeftFoot.Mesh->GetBoneLocation(LeftFoot.HipBone);
+    FVector HipBoneWorld   = LeftFoot.Mesh->GetBoneLocation(LeftFoot.HipBone);
 
-    bool bAnyBusy = LeftFoot.bStriding || RightFoot.bStriding
-        || LeftFoot.CooldownTimer > 0.f
-        || RightFoot.CooldownTimer > 0.f;
+    bool bAnyBusy = LeftFoot.bStriding  || RightFoot.bStriding
+                 || LeftFoot.CooldownTimer > 0.f
+                 || RightFoot.CooldownTimer > 0.f;
 
-    float LeftDistToHip = FVector2D(
-        LeftBoneWorld.X - HipBoneWorld.X,
-        LeftBoneWorld.Y - HipBoneWorld.Y).Size();
-
-    float RightDistToHip = FVector2D(
-        RightBoneWorld.X - HipBoneWorld.X,
-        RightBoneWorld.Y - HipBoneWorld.Y).Size();
+    float LeftDistToHip  = FVector2D(LeftBoneWorld.X  - HipBoneWorld.X, LeftBoneWorld.Y  - HipBoneWorld.Y).Size();
+    float RightDistToHip = FVector2D(RightBoneWorld.X - HipBoneWorld.X, RightBoneWorld.Y - HipBoneWorld.Y).Size();
 
     if (LeftDistToHip >= RightDistToHip)
     {
         SolveFoot(LeftFoot, ActorWorldPos, ActorWorldRot,
             LeftBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutLeftGoal);
 
-        bAnyBusy = LeftFoot.bStriding || RightFoot.bStriding
-            || LeftFoot.CooldownTimer > 0.f
-            || RightFoot.CooldownTimer > 0.f;
+        bAnyBusy = LeftFoot.bStriding  || RightFoot.bStriding
+                || LeftFoot.CooldownTimer > 0.f
+                || RightFoot.CooldownTimer > 0.f;
 
         SolveFoot(RightFoot, ActorWorldPos, ActorWorldRot,
             RightBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutRightGoal);
@@ -421,9 +593,9 @@ void UAnimBPNodes::SolveFootIK(
         SolveFoot(RightFoot, ActorWorldPos, ActorWorldRot,
             RightBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutRightGoal);
 
-        bAnyBusy = LeftFoot.bStriding || RightFoot.bStriding
-            || LeftFoot.CooldownTimer > 0.f
-            || RightFoot.CooldownTimer > 0.f;
+        bAnyBusy = LeftFoot.bStriding  || RightFoot.bStriding
+                || LeftFoot.CooldownTimer > 0.f
+                || RightFoot.CooldownTimer > 0.f;
 
         SolveFoot(LeftFoot, ActorWorldPos, ActorWorldRot,
             LeftBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutLeftGoal);
@@ -436,6 +608,6 @@ bool UAnimBPNodes::AreFeetRepositioned(
 {
     return !LeftFoot.bStriding
         && !RightFoot.bStriding
-        && LeftFoot.CooldownTimer <= 0.f
+        && LeftFoot.CooldownTimer  <= 0.f
         && RightFoot.CooldownTimer <= 0.f;
 }

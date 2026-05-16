@@ -4,9 +4,8 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
+#include "Animation/AnimMontage.h"
 #include "AnimBPNodes.generated.h"
-
-DECLARE_LOG_CATEGORY_EXTERN(LogSwordIK, Log, All);
 
 // ─────────────────────────────────────────────
 // CURVE SAMPLER
@@ -98,92 +97,142 @@ struct FFootIKState
 };
 
 // ─────────────────────────────────────────────
-// HAND IK
+// THRUST SYSTEM
 // ─────────────────────────────────────────────
 
 USTRUCT(BlueprintType)
-struct FHandIKState
+struct FThrustState
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    USkeletalMeshComponent* Mesh = nullptr;
+    // ── References ───────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Setup")
+    USkeletalMeshComponent* AttackerMesh = nullptr;
 
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    AActor* AttackerActor = nullptr;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    FName HandBoneName;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    FName GoalPropertyName;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    FName RotationPropertyName;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Dom")
-    FName DomIKLoc;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Dom")
-    FName DomIKRot;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Dom")
-    FName SlaveIKLoc;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Dom")
-    FName SlaveIKRot;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    FVector StartHandGoalLocal = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    FVector FinalHandGoalLocal = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    FRotator StartHandRotLocal = FRotator::ZeroRotator;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    FRotator FinalHandRotLocal = FRotator::ZeroRotator;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    FVector LastPosDelta = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    FRotator LastRotDelta = FRotator::ZeroRotator;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    float Duration = 0.1f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    int32 TotalFrames = 0;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    int32 FramesRemaining = 0;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK")
-    bool bActive = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Slave")
-    bool bHasSlave = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Slave")
-    FName SlaveGoalPropertyName;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Slave")
-    FName SlaveRotationPropertyName;
-
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Position")
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Setup")
     AActor* VictimActor = nullptr;
 
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Position")
-    FName VictimBoneName;
+    // ── ABP goal variable names ──────────────────────────────────────────────
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Goals")
+    FName DomLocGoal;
 
-    // Posición world capturada al terminar TickHandIK — usada por TickHandIKFreeze
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Freeze")
-    FVector FrozenHandWorldPos = FVector::ZeroVector;
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Goals")
+    FName DomRotGoal;
 
-    UPROPERTY(BlueprintReadWrite, Category = "HandIK|Freeze")
-    bool bFreezeActive = false;
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Goals")
+    FName SlaveLocGoal;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Goals")
+    FName SlaveRotGoal;
+
+    // ── Rest pose (A-pose defaults read from ABP at setup time) ─────────────
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Rest")
+    FVector DomRestPos = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Rest")
+    FRotator DomRestRot = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Rest")
+    FVector SlaveRestPos = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Rest")
+    FRotator SlaveRestRot = FRotator::ZeroRotator;
+
+    // ── IK solution (absolute component space) ──────────────────────────────
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
+    FName PivotBone;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
+    FName TargetBone;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
+    FVector TargetBoneWorld = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
+    FRotator DomStartRotCS = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
+    FRotator DomTargetRotCS = FRotator::ZeroRotator;
+
+    // ── Lerp state ───────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Lerp")
+    float HitReachDelay = 0.1f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Lerp")
+    int32 TotalFrames = 0;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Lerp")
+    int32 FramesRemaining = 0;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Lerp")
+    bool bActive = false;
+
+    // ── Plant state ──────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    bool bPlanted = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    FRotator PlantedRotCS = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    float PlantDuration = 0.f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    float PlantElapsed = 0.f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    FVector PlantedDomHandWorld = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    FRotator PlantedDomRotWorld = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    FVector PlantedSlaveHandWorld = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    FRotator PlantedSlaveRotWorld = FRotator::ZeroRotator;
+
+    // Victim bone world position captured at plant start — tracking origin
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    FVector PlantedTargetBoneWorld = FVector::ZeroVector;
+
+    // ── Recover ──────────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    UAnimMontage* Montage = nullptr;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    float MontagePos = 0.f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    float RecoverDuration = 0.1f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    bool bRecovering = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    bool bMontageReversing = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    int32 RecoverFramesTotal = 0;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    int32 RecoverFramesRemaining = 0;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    FVector RecoverDomStartPosCS = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    FRotator RecoverDomStartRotCS = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    FVector RecoverSlaveStartPosCS = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    FRotator RecoverSlaveStartRotCS = FRotator::ZeroRotator;
+
+    // ── Debug ────────────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Debug")
+    bool bDebug = false;
 };
 
 // ─────────────────────────────────────────────
@@ -197,6 +246,7 @@ class SALVADORTEST_API UAnimBPNodes : public UBlueprintFunctionLibrary
 
 public:
 
+    // ── Curve ────────────────────────────────────────────────────────────────
     UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|Curve")
     static void SampleCurve(
         UPARAM(ref) FCurveSamplerState& State,
@@ -208,27 +258,54 @@ public:
         bool& bOutFinished
     );
 
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|SwordContactIK")
-    static void SolveHandIK(
-        UPARAM(ref) FHandIKState& State,
-        USkeletalMeshComponent* AttackerMesh,
+    // ── Thrust System ────────────────────────────────────────────────────────
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|ThrustSystem")
+    static void ThrustSetUp(
+        UPARAM(ref) FThrustState& State,
+        AActor* AttackerActor,
+        AActor* VictimActor,
+        FName DomLocGoal,
+        FName DomRotGoal,
+        FName SlaveLocGoal,
+        FName SlaveRotGoal,
         const TArray<FName>& ContactSockets,
         FVector HitLocation,
-        AActor* VictimActor,
         FName TargetBoneName,
-        FName DomIKLoc,
-        FName DomIKRot,
-        FName SlaveIKLoc,
-        FName SlaveIKRot,
-        float Duration
+        float HitReachDelay,
+        float PlantDuration,
+        UAnimMontage* Montage,
+        float MontageCurrentPos,
+        float RecoverDuration,
+        bool bDebug
     );
 
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|SwordContactIK")
-    static void TickHandIK(
-        UPARAM(ref) FHandIKState& State,
-        float DeltaTime
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|ThrustSystem")
+    static void ThrustRecover(
+        UPARAM(ref) FThrustState& State,
+        float DeltaTime,
+        bool& bOutComplete
     );
 
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|ThrustSystem")
+    static void ThrustTick(
+        UPARAM(ref) FThrustState& State,
+        float DeltaTime,
+        bool& bOutComplete
+    );
+
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|ThrustSystem")
+    static void ThrustPlant(
+        UPARAM(ref) FThrustState& State,
+        float DeltaTime,
+        bool& bOutComplete
+    );
+
+    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|ThrustSystem")
+    static void ThrustEnd(
+        UPARAM(ref) FThrustState& State
+    );
+
+    // ── Foot IK ──────────────────────────────────────────────────────────────
     UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|FootIK")
     static void SetupFootIK(
         UPARAM(ref) FFootIKState& Foot,
