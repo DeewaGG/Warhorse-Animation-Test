@@ -207,6 +207,7 @@ void UAnimBPNodes::ThrustSetUp(
     State.SlaveLocGoal    = SlaveLocGoal;
     State.SlaveRotGoal    = SlaveRotGoal;
     State.PivotBone       = PivotBone;
+    State.ContactSocket   = ClosestSocket;
     State.TargetBone       = TargetBoneName;
     State.TargetBoneWorld  = TargetWorld;
     State.TargetBoneOffset = TargetBoneOffset;
@@ -315,68 +316,65 @@ void UAnimBPNodes::ThrustPlant(
         ? State.VictimActor->FindComponentByClass<USkeletalMeshComponent>()
         : nullptr;
 
-    // First frame: lock all values into world space and capture victim bone state
+    // First frame: compute socket→hand offset in CS (constant for this plant)
     if (State.FramesRemaining == 0)
     {
-        // CS → World:  W = CompQ * CS
-        State.PlantedDomHandWorld   = CompTW.TransformPosition(GetAnimVec(AnimInst, State.DomLocGoal));
-        State.PlantedDomRotWorld    = (CompQ * GetAnimRot(AnimInst, State.DomRotGoal).Quaternion()).Rotator();
-        State.PlantedSlaveHandWorld = CompTW.TransformPosition(GetAnimVec(AnimInst, State.SlaveLocGoal));
-        State.PlantedSlaveRotWorld  = (CompQ * GetAnimRot(AnimInst, State.SlaveRotGoal).Quaternion()).Rotator();
+        const FVector SocketCS         = CompTW.InverseTransformPosition(
+            State.AttackerMesh->GetSocketLocation(State.ContactSocket));
+        State.SocketToHandOffsetCS     = GetAnimVec(AnimInst, State.DomLocGoal) - SocketCS;
 
-        // Capture victim surface point as the tracking origin (bone + setup offset)
-        State.PlantedTargetBoneWorld = (VictimMesh && State.TargetBone != NAME_None)
-            ? VictimMesh->GetBoneLocation(State.TargetBone) + State.TargetBoneOffset
-            : State.PlantedDomHandWorld;
+        // Slave hand captured in dom-hand local space so it stays glued to the sword
+        const FVector DomHandWorld  = CompTW.TransformPosition(GetAnimVec(AnimInst, State.DomLocGoal));
+        const FQuat   DomRotWorld   = CompQ * State.PlantedRotCS.Quaternion();
+        const FTransform DomHandTW(DomRotWorld, DomHandWorld);
+
+        const FVector SlaveHandWorld = CompTW.TransformPosition(GetAnimVec(AnimInst, State.SlaveLocGoal));
+        const FQuat   SlaveRotWorld  = CompQ * GetAnimRot(AnimInst, State.SlaveRotGoal).Quaternion();
+
+        State.SlaveInDomHandOffsetLocal = DomHandTW.InverseTransformPosition(SlaveHandWorld);
+        State.SlaveRotInDomHandLocal    = (DomRotWorld.Inverse() * SlaveRotWorld).Rotator();
 
         State.FramesRemaining = -1;
     }
 
-    // Compute current hand world position and rotation, tracking the victim bone
-    FVector CurrentDomHandWorld  = State.PlantedDomHandWorld;
-    FQuat   CurrentDomRotWorld   = State.PlantedDomRotWorld.Quaternion();
+    // Socket target: victim surface point or fixed world position
+    const FVector CurrentTargetWorld = (VictimMesh && State.TargetBone != NAME_None)
+        ? VictimMesh->GetBoneLocation(State.TargetBone) + State.TargetBoneOffset
+        : State.TargetBoneWorld;
 
-    if (VictimMesh && State.TargetBone != NAME_None)
-    {
-        const FVector CurrentBoneWorld = VictimMesh->GetBoneLocation(State.TargetBone) + State.TargetBoneOffset;
+    // Derive hand CS so the socket lands exactly on CurrentTargetWorld
+    const FVector DesiredSocketCS = CompTW.InverseTransformPosition(CurrentTargetWorld);
+    const FVector DesiredHandCS   = DesiredSocketCS + State.SocketToHandOffsetCS;
 
-        // Position: only 10% of the victim's movement reaches the hand
-        CurrentDomHandWorld = State.PlantedDomHandWorld
-            + (CurrentBoneWorld - State.PlantedTargetBoneWorld) * 0.1f;
-
-        // Rotation: recompute full blade direction each frame so the remaining
-        // 90% of movement is absorbed by arm/wrist rotation
-        const FVector PlantedBladeDir = (State.PlantedTargetBoneWorld - State.PlantedDomHandWorld).GetSafeNormal();
-        const FVector CurrentBladeDir = (CurrentBoneWorld             - CurrentDomHandWorld).GetSafeNormal();
-        const FQuat   BladeRotDelta   = FQuat::FindBetweenVectors(PlantedBladeDir, CurrentBladeDir);
-        CurrentDomRotWorld            = BladeRotDelta * State.PlantedDomRotWorld.Quaternion();
-    }
-
-    // Distance limit: if the hand goal drifts too far from LimitBone, trigger recovery
+    // Distance limit
     if (State.MaxDistFromBone > 0.f && State.LimitBone != NAME_None)
     {
         const FVector LimitBoneWorld = State.AttackerMesh->GetBoneLocation(State.LimitBone);
-        if (FVector::Dist(CurrentDomHandWorld, LimitBoneWorld) > State.MaxDistFromBone)
+        if (FVector::Dist(CurrentTargetWorld, LimitBoneWorld) > State.MaxDistFromBone)
             bOutComplete = true;
     }
 
     if (State.bDebug && State.LimitBone != NAME_None && GEngine)
     {
         const FVector LimitBoneWorld = State.AttackerMesh->GetBoneLocation(State.LimitBone);
-        const float   Dist           = FVector::Dist(CurrentDomHandWorld, LimitBoneWorld);
+        const float   Dist           = FVector::Dist(CurrentTargetWorld, LimitBoneWorld);
         GEngine->AddOnScreenDebugMessage(-1, 0.f, FColor::Green,
             FString::Printf(TEXT("ThrustPlant | dist to %s: %.1f cm"), *State.LimitBone.ToString(), Dist));
     }
 
-    // World → CS:  CS = CompQ.Inv * W
-    SetAnimVec(AnimInst, State.DomLocGoal,
-        CompTW.InverseTransformPosition(CurrentDomHandWorld));
-    SetAnimRot(AnimInst, State.DomRotGoal,
-        (CompQ.Inverse() * CurrentDomRotWorld).Rotator());
-    SetAnimVec(AnimInst, State.SlaveLocGoal,
-        CompTW.InverseTransformPosition(State.PlantedSlaveHandWorld));
-    SetAnimRot(AnimInst, State.SlaveRotGoal,
-        (CompQ.Inverse() * State.PlantedSlaveRotWorld.Quaternion()).Rotator());
+    SetAnimVec(AnimInst, State.DomLocGoal, DesiredHandCS);
+    SetAnimRot(AnimInst, State.DomRotGoal, State.PlantedRotCS);
+
+    // Slave: reconstruct from dom-hand world transform so it tracks the sword
+    const FVector DomHandWorld   = CompTW.TransformPosition(DesiredHandCS);
+    const FQuat   DomRotWorld    = CompQ * State.PlantedRotCS.Quaternion();
+    const FTransform DomHandTW(DomRotWorld, DomHandWorld);
+
+    const FVector SlaveHandWorld = DomHandTW.TransformPosition(State.SlaveInDomHandOffsetLocal);
+    const FQuat   SlaveRotWorld  = DomRotWorld * State.SlaveRotInDomHandLocal.Quaternion();
+
+    SetAnimVec(AnimInst, State.SlaveLocGoal, CompTW.InverseTransformPosition(SlaveHandWorld));
+    SetAnimRot(AnimInst, State.SlaveRotGoal, (CompQ.Inverse() * SlaveRotWorld).Rotator());
 
     // PlantDuration timer — 0 means infinite
     if (State.PlantDuration > 0.f)

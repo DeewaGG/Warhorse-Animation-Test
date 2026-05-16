@@ -178,6 +178,12 @@ struct FThrustState
     bool bPlanted = false;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    FName ContactSocket;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    FVector SocketToHandOffsetCS = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
     FRotator PlantedRotCS = FRotator::ZeroRotator;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
@@ -197,6 +203,12 @@ struct FThrustState
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
     FRotator PlantedSlaveRotWorld = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    FVector SlaveInDomHandOffsetLocal = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    FRotator SlaveRotInDomHandLocal = FRotator::ZeroRotator;
 
     // Victim bone world position captured at plant start — tracking origin
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
