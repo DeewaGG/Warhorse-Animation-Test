@@ -1,6 +1,7 @@
 #include "AnimBPNodes.h"
 #include "Curves/CurveFloat.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
 #include "Engine/SkeletalMeshSocket.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
@@ -107,6 +108,9 @@ void UAnimBPNodes::ThrustSetUp(
     UAnimMontage* Montage,
     float MontageCurrentPos,
     float RecoverDuration,
+    FName LimitBone,
+    float MaxDistFromBone,
+    float StabDepth,
     bool bDebug)
 {
     if (!AttackerActor || ContactSockets.Num() == 0 || HitReachDelay <= 0.f)
@@ -126,8 +130,7 @@ void UAnimBPNodes::ThrustSetUp(
         ? VictimActor->FindComponentByClass<USkeletalMeshComponent>()
         : nullptr;
 
-    // Target world position
-    const FVector TargetWorld = (VictimMesh && TargetBoneName != NAME_None)
+    const FVector RawTargetWorld = (VictimMesh && TargetBoneName != NAME_None)
         ? VictimMesh->GetBoneLocation(TargetBoneName)
         : HitLocation;
 
@@ -140,6 +143,22 @@ void UAnimBPNodes::ThrustSetUp(
         const FVector SW  = AttackerMesh->GetSocketLocation(ContactSockets[i]);
         const float   DSq = FVector::DistSquared(HitLocation, SW);
         if (DSq < MinDistSq) { MinDistSq = DSq; ClosestSocketWorld = SW; ClosestSocket = ContactSockets[i]; }
+    }
+
+    // Raycast from chosen socket to victim bone — land on surface instead of going through mesh
+    FVector TargetWorld      = RawTargetWorld;
+    FVector TargetBoneOffset = FVector::ZeroVector;
+    {
+        UWorld* TraceWorld = AttackerMesh->GetWorld();
+        FHitResult Hit;
+        FCollisionQueryParams Params(NAME_None, false, AttackerActor);
+        if (TraceWorld && TraceWorld->LineTraceSingleByChannel(
+                Hit, ClosestSocketWorld, RawTargetWorld, ECC_GameTraceChannel2, Params))
+        {
+            const FVector TraceDir = (RawTargetWorld - ClosestSocketWorld).GetSafeNormal();
+            TargetWorld      = Hit.ImpactPoint + TraceDir * StabDepth;
+            TargetBoneOffset = TargetWorld - RawTargetWorld;
+        }
     }
 
     // Pivot bone = parent bone of closest socket
@@ -156,9 +175,20 @@ void UAnimBPNodes::ThrustSetUp(
     State.SlaveRestRot = GetAnimRot(AnimInst, SlaveRotGoal);
 
     // Rotation delta: current socket direction → target direction (world space)
-    const FVector CurrentDir = (ClosestSocketWorld - PivotWorld).GetSafeNormal();
-    const FVector TargetDir  = (TargetWorld         - PivotWorld).GetSafeNormal();
-    const FQuat   DeltaWorld = FQuat::FindBetweenVectors(CurrentDir, TargetDir);
+    const FVector CurrentDir   = (ClosestSocketWorld - PivotWorld).GetSafeNormal();
+    const FVector RawTargetDir = (TargetWorld        - PivotWorld).GetSafeNormal();
+
+    // If the clamped target ended up behind the pivot, TargetDir would be antiparallel
+    // to CurrentDir causing a ~180° flip. Instead project onto the hemisphere boundary:
+    // remove the component along CurrentDir and renormalize → max 90° rotation toward the target.
+    FVector TargetDir = RawTargetDir;
+    if (FVector::DotProduct(CurrentDir, RawTargetDir) < 0.f)
+    {
+        const FVector Tangent = (RawTargetDir - FVector::DotProduct(RawTargetDir, CurrentDir) * CurrentDir).GetSafeNormal();
+        TargetDir = Tangent.IsNearlyZero() ? CurrentDir : Tangent;
+    }
+
+    const FQuat DeltaWorld = FQuat::FindBetweenVectors(CurrentDir, TargetDir);
 
     // World delta → component space
     const FQuat CompWorldQuat = AttackerMesh->GetComponentTransform().GetRotation();
@@ -177,8 +207,9 @@ void UAnimBPNodes::ThrustSetUp(
     State.SlaveLocGoal    = SlaveLocGoal;
     State.SlaveRotGoal    = SlaveRotGoal;
     State.PivotBone       = PivotBone;
-    State.TargetBone      = TargetBoneName;
-    State.TargetBoneWorld = TargetWorld;
+    State.TargetBone       = TargetBoneName;
+    State.TargetBoneWorld  = TargetWorld;
+    State.TargetBoneOffset = TargetBoneOffset;
     State.DomStartRotCS   = StartRotCS.Rotator();
     State.DomTargetRotCS  = TargetRotCS.Rotator();
     State.HitReachDelay   = HitReachDelay;
@@ -192,6 +223,9 @@ void UAnimBPNodes::ThrustSetUp(
     State.bActive         = true;
     State.bPlanted        = false;
     State.PlantedRotCS    = FRotator::ZeroRotator;
+    State.LimitBone       = LimitBone;
+    State.MaxDistFromBone = MaxDistFromBone;
+    State.StabDepth       = StabDepth;
     State.bDebug          = bDebug;
 
     if (bDebug)
@@ -207,9 +241,13 @@ void UAnimBPNodes::ThrustSetUp(
                     bClose ? FColor::Cyan : FColor::Red, false, 4.f);
             }
             DrawDebugSphere(World, PivotWorld,  5.f, 8,  FColor::Green, false, 4.f);
-            DrawDebugSphere(World, TargetWorld, 5.f, 12, FColor::Black, false, 4.f);
-            DrawDebugBox   (World, TargetWorld, FVector(4.f, 4.f, 50.f), FQuat::Identity, FColor::Black, false, 4.f);
-            DrawDebugLine  (World, ClosestSocketWorld, TargetWorld,            FColor::Yellow, false, 4.f, 0, 0.5f);
+            DrawDebugSphere(World, RawTargetWorld, 5.f, 12, FColor::Black, false, 4.f);
+            DrawDebugBox   (World, RawTargetWorld, FVector(4.f, 4.f, 50.f), FQuat::Identity, FColor::Black, false, 4.f);
+            DrawDebugSphere(World, TargetWorld,    5.f, 12, FColor::White, false, 4.f);
+            DrawDebugBox   (World, TargetWorld,    FVector(4.f, 4.f, 50.f), FQuat::Identity, FColor::White, false, 4.f);
+            // Full trace extent: socket → bone (orange). Hit segment: socket → impact (yellow).
+            DrawDebugLine(World, ClosestSocketWorld, RawTargetWorld, FColor::Orange, false, 4.f, 0, 0.5f);
+            DrawDebugLine(World, ClosestSocketWorld, TargetWorld,    FColor::Yellow, false, 4.f, 0, 1.5f);
             DrawDebugLine  (World, PivotWorld, PivotWorld + CurrentDir * 40.f, FColor::Red,    false, 4.f, 0, 0.5f);
             DrawDebugLine  (World, PivotWorld, PivotWorld + TargetDir  * 40.f, FColor::Green,  false, 4.f, 0, 0.5f);
         }
@@ -286,9 +324,9 @@ void UAnimBPNodes::ThrustPlant(
         State.PlantedSlaveHandWorld = CompTW.TransformPosition(GetAnimVec(AnimInst, State.SlaveLocGoal));
         State.PlantedSlaveRotWorld  = (CompQ * GetAnimRot(AnimInst, State.SlaveRotGoal).Quaternion()).Rotator();
 
-        // Capture victim bone world state as the tracking origin
+        // Capture victim surface point as the tracking origin (bone + setup offset)
         State.PlantedTargetBoneWorld = (VictimMesh && State.TargetBone != NAME_None)
-            ? VictimMesh->GetBoneLocation(State.TargetBone)
+            ? VictimMesh->GetBoneLocation(State.TargetBone) + State.TargetBoneOffset
             : State.PlantedDomHandWorld;
 
         State.FramesRemaining = -1;
@@ -300,7 +338,7 @@ void UAnimBPNodes::ThrustPlant(
 
     if (VictimMesh && State.TargetBone != NAME_None)
     {
-        const FVector CurrentBoneWorld = VictimMesh->GetBoneLocation(State.TargetBone);
+        const FVector CurrentBoneWorld = VictimMesh->GetBoneLocation(State.TargetBone) + State.TargetBoneOffset;
 
         // Position: only 10% of the victim's movement reaches the hand
         CurrentDomHandWorld = State.PlantedDomHandWorld
@@ -312,6 +350,22 @@ void UAnimBPNodes::ThrustPlant(
         const FVector CurrentBladeDir = (CurrentBoneWorld             - CurrentDomHandWorld).GetSafeNormal();
         const FQuat   BladeRotDelta   = FQuat::FindBetweenVectors(PlantedBladeDir, CurrentBladeDir);
         CurrentDomRotWorld            = BladeRotDelta * State.PlantedDomRotWorld.Quaternion();
+    }
+
+    // Distance limit: if the hand goal drifts too far from LimitBone, trigger recovery
+    if (State.MaxDistFromBone > 0.f && State.LimitBone != NAME_None)
+    {
+        const FVector LimitBoneWorld = State.AttackerMesh->GetBoneLocation(State.LimitBone);
+        if (FVector::Dist(CurrentDomHandWorld, LimitBoneWorld) > State.MaxDistFromBone)
+            bOutComplete = true;
+    }
+
+    if (State.bDebug && State.LimitBone != NAME_None && GEngine)
+    {
+        const FVector LimitBoneWorld = State.AttackerMesh->GetBoneLocation(State.LimitBone);
+        const float   Dist           = FVector::Dist(CurrentDomHandWorld, LimitBoneWorld);
+        GEngine->AddOnScreenDebugMessage(-1, 0.f, FColor::Green,
+            FString::Printf(TEXT("ThrustPlant | dist to %s: %.1f cm"), *State.LimitBone.ToString(), Dist));
     }
 
     // World → CS:  CS = CompQ.Inv * W
@@ -347,8 +401,10 @@ void UAnimBPNodes::ThrustRecover(
     // ── Init: IK lerp + montage backward start at the same time ─────────────
     if (!State.bRecovering)
     {
-        State.bRecovering            = true;
+        State.bRecovering             = true;
+        State.RecoverDomStartPosCS   = GetAnimVec(AnimInst, State.DomLocGoal);
         State.RecoverDomStartRotCS   = GetAnimRot(AnimInst, State.DomRotGoal);
+        State.RecoverSlaveStartPosCS = GetAnimVec(AnimInst, State.SlaveLocGoal);
         State.RecoverSlaveStartRotCS = GetAnimRot(AnimInst, State.SlaveRotGoal);
 
         if (State.Montage)
@@ -400,12 +456,17 @@ void UAnimBPNodes::ThrustRecover(
     }
 
     // ── IK lerp ───────────────────────────────────────────────────────────────
-    SetAnimVec(AnimInst, State.DomLocGoal,   State.DomRestPos);
+    // Alpha: 1 at start (impact pose) → 0 at end (rest pose)
+    // Lerp/Slerp(rest, start, Alpha): Alpha=1 → start, Alpha=0 → rest
+
+    SetAnimVec(AnimInst, State.DomLocGoal,
+        FMath::Lerp(State.DomRestPos,   State.RecoverDomStartPosCS,   Alpha));
     SetAnimRot(AnimInst, State.DomRotGoal,
-        FQuat::Slerp(State.RecoverDomStartRotCS.Quaternion(), State.DomRestRot.Quaternion(), Alpha).Rotator());
-    SetAnimVec(AnimInst, State.SlaveLocGoal, State.SlaveRestPos);
+        FQuat::Slerp(State.DomRestRot.Quaternion(), State.RecoverDomStartRotCS.Quaternion(), Alpha).Rotator());
+    SetAnimVec(AnimInst, State.SlaveLocGoal,
+        FMath::Lerp(State.SlaveRestPos, State.RecoverSlaveStartPosCS, Alpha));
     SetAnimRot(AnimInst, State.SlaveRotGoal,
-        FQuat::Slerp(State.RecoverSlaveStartRotCS.Quaternion(), State.SlaveRestRot.Quaternion(), Alpha).Rotator());
+        FQuat::Slerp(State.SlaveRestRot.Quaternion(), State.RecoverSlaveStartRotCS.Quaternion(), Alpha).Rotator());
 
     if (bDone)
     {

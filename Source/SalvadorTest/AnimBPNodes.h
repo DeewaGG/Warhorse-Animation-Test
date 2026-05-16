@@ -149,6 +149,12 @@ struct FThrustState
     FVector TargetBoneWorld = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
+    FVector TargetBoneOffset = FVector::ZeroVector;  // surface hit point minus bone world at setup
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
+    float StabDepth = 0.f;  // cm past the surface hit point along the trace direction
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
     FRotator DomStartRotCS = FRotator::ZeroRotator;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
@@ -230,6 +236,13 @@ struct FThrustState
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
     FRotator RecoverSlaveStartRotCS = FRotator::ZeroRotator;
 
+    // ── Constraints ──────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Constraints")
+    FName LimitBone = TEXT("spine_03");
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Constraints")
+    float MaxDistFromBone = 0.f;  // 0 = unlimited
+
     // ── Debug ────────────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Debug")
     bool bDebug = false;
@@ -276,6 +289,9 @@ public:
         UAnimMontage* Montage,
         float MontageCurrentPos,
         float RecoverDuration,
+        FName LimitBone,
+        float MaxDistFromBone,
+        float StabDepth,
         bool bDebug
     );
 
