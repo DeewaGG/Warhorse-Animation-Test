@@ -78,6 +78,41 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Push")
     double VictimPushForce = 1.0;
 
+    // ── Bone names ────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
+    FName PelvisBoneName = TEXT("pelvis");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
+    FName FallbackHitBone = TEXT("spine_01");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
+    FName UpperSimBone = TEXT("spine_03");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
+    FName MidSimBone = TEXT("spine_01");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
+    FName LowerSimBoneL = TEXT("thigh_l");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
+    FName LowerSimBoneR = TEXT("thigh_r");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
+    FName VirtualPelvisBone = TEXT("VB pelvis");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
+    FName VirtualLeftFootBone = TEXT("VB foot_l");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
+    FName VirtualRightFootBone = TEXT("VB foot_r");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
+    FName RootSimBone = TEXT("root");
+
+    // ── Physical animation ────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Physics")
+    FName PhysicalAnimProfile = TEXT("HitReaction");
+
     // ── Impulse direction/drop scalars ────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Impulse")
     float RHitDirScale = 1.f;

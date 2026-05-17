@@ -67,15 +67,15 @@ void UHitReactionComponent::HitW_Physics(int32 InAttackSide, FName InBoneHit, FV
 
     AttackSide = InAttackSide;
 
-    HitBone = (InBoneHit == TEXT("pelvis") || InBoneHit.IsNone()) ? FName(TEXT("spine_01")) : InBoneHit;
+    HitBone = (InBoneHit == PelvisBoneName || InBoneHit.IsNone()) ? FallbackHitBone : InBoneHit;
 
     PhysicsBones.Reset();
     switch (AttackSide)
     {
-        case 0:  PhysicsBones = { TEXT("spine_03"), HitBone };                                          break;
-        case 1:  PhysicsBones = { TEXT("spine_01"), HitBone };                                          break;
-        case 2:  PhysicsBones = { TEXT("thigh_l"), TEXT("thigh_r"), HitBone };                          break;
-        default: PhysicsBones = { TEXT("spine_01"), HitBone };                                          break;
+        case 0:  PhysicsBones = { UpperSimBone, HitBone };                    break;
+        case 1:  PhysicsBones = { MidSimBone, HitBone };                      break;
+        case 2:  PhysicsBones = { LowerSimBoneL, LowerSimBoneR, HitBone };    break;
+        default: PhysicsBones = { MidSimBone, HitBone };                      break;
     }
 
     ProtectHit(InHitDir, InHitStrength);
@@ -101,7 +101,7 @@ void UHitReactionComponent::ActivateSimBones()
     for (const FName& Bone : PhysicsBones)
     {
         Mesh->SetAllBodiesBelowSimulatePhysics(Bone, true, true);
-        PhysicAnimComp->ApplyPhysicalAnimationProfileBelow(Bone, TEXT("HitReaction"), true, true);
+        PhysicAnimComp->ApplyPhysicalAnimationProfileBelow(Bone, PhysicalAnimProfile, true, true);
     }
 
     for (const FName& Bone : PhysicsBones)
@@ -128,7 +128,7 @@ void UHitReactionComponent::SetupVarsForSim()
         RestRightFootPos   = ABP->RightFootIKPosition;
         FrozenLeftFootIK   = ABP->LeftFootIKPosition;
         FrozenRightFootIK  = ABP->RightFootIKPosition;
-        FrozenPelvisWorldL = Mesh->GetBoneLocation(TEXT("VB pelvis"));
+        FrozenPelvisWorldL = Mesh->GetBoneLocation(VirtualPelvisBone);
         FrozenPelvisWorldR = FrozenPelvisWorldL;
         bWasLStriding      = false;
         bWasRStriding      = false;
@@ -146,13 +146,13 @@ void UHitReactionComponent::SetupStrides(FVector LeftGoal, FVector RightGoal, bo
     const FVector MeshLoc = Mesh->GetComponentLocation();
 
     UFootIKNodes::SetupFootIK(
-        LFootState, Mesh, TEXT("VB foot_l"), TEXT("VB pelvis"),
+        LFootState, Mesh, VirtualLeftFootBone, VirtualPelvisBone,
         MeshLoc, LeftGoal,
         LStrideThreshold, LStrideDuration, LStrideHeight, LStrideCooldown, LStrideReach,
         31.f, 100.f);
 
     UFootIKNodes::SetupFootIK(
-        RFootState, Mesh, TEXT("VB foot_r"), TEXT("VB pelvis"),
+        RFootState, Mesh, VirtualRightFootBone, VirtualPelvisBone,
         MeshLoc, RightGoal,
         RStrideThreshold, RStrideDuration, RStrideHeight, RStrideCooldown, RStrideReach,
         31.f, 100.f);
@@ -242,7 +242,7 @@ void UHitReactionComponent::ReactiveSteps(float DeltaTime)
     if (!Mesh || !ABP) return;
 
     const FTransform MeshTW    = Mesh->GetComponentTransform();
-    const FVector    PelvisNow = Mesh->GetBoneLocation(TEXT("VB pelvis"));
+    const FVector    PelvisNow = Mesh->GetBoneLocation(VirtualPelvisBone);
     const FVector    MeshLoc   = Mesh->GetComponentLocation();
     const FRotator   MeshRot   = Mesh->GetComponentRotation();
 
@@ -288,7 +288,7 @@ void UHitReactionComponent::ReactiveSteps(float DeltaTime)
 void UHitReactionComponent::SimFinish()
 {
     if (!Mesh) return;
-    Mesh->SetAllBodiesBelowSimulatePhysics(TEXT("root"), false, true);
+    Mesh->SetAllBodiesBelowSimulatePhysics(RootSimBone, false, true);
 }
 
 void UHitReactionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -303,12 +303,17 @@ void UHitReactionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
         {
             bSimFinishTriggered = true;
 
-            SetupStrides(RestLeftFootPos, RestRightFootPos, true);
             if (ABP)
             {
-                LFootState.StrideStartGoal = ABP->LeftFootIKPosition;
-                RFootState.StrideStartGoal = ABP->RightFootIKPosition;
+                FrozenLeftFootIK   = ABP->LeftFootIKPosition;
+                FrozenRightFootIK  = ABP->RightFootIKPosition;
+                FrozenPelvisWorldL = Mesh->GetBoneLocation(VirtualPelvisBone);
+                FrozenPelvisWorldR = FrozenPelvisWorldL;
+                bWasLStriding      = false;
+                bWasRStriding      = false;
             }
+
+            SetupStrides(RestLeftFootPos, RestRightFootPos, false);
 
             bRepositioning = true;
             SimFinish();
