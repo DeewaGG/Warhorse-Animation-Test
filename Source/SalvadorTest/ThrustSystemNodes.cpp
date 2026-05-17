@@ -233,16 +233,19 @@ void UThrustSystemNodes::ThrustTick(
 
     const FQuat    StartQ    = State.DomStartRotCS.Quaternion();
     const FQuat    TargetQ   = State.DomTargetRotCS.Quaternion();
-    const FRotator LerpedRot = FQuat::Slerp(StartQ, TargetQ, Alpha).Rotator();
+    const FQuat    LerpedCSQ = FQuat::Slerp(StartQ, TargetQ, Alpha);
+    const FRotator LerpedRot = LerpedCSQ.Rotator();
 
     FVector DomGoalCS   = State.DomRestPos;
     FVector SlaveGoalCS = State.SlaveRestPos;
 
     if (State.ArmReachPercent > 0.f)
     {
-        const FTransform CompTW = State.AttackerMesh->GetComponentTransform();
-        const FVector TargetCS  = CompTW.InverseTransformPosition(State.TargetBoneWorld);
-        const FVector ArmDelta  = (TargetCS - State.DomRestPos) * (State.ArmReachPercent * Alpha);
+        const FTransform CompTW      = State.AttackerMesh->GetComponentTransform();
+        const FVector    TargetCS    = CompTW.InverseTransformPosition(State.TargetBoneWorld);
+        // Offset the hand target so the contact socket tip lands on TargetCS, not the hand.
+        const FVector    HandTargetCS = TargetCS - LerpedCSQ.RotateVector(State.SocketRelativeLocation);
+        const FVector    ArmDelta     = (HandTargetCS - State.DomRestPos) * (State.ArmReachPercent * Alpha);
         DomGoalCS   = State.DomRestPos   + ArmDelta;
         SlaveGoalCS = State.SlaveRestPos + ArmDelta;
     }

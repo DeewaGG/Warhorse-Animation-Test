@@ -73,13 +73,16 @@ void UFootIKNodes::SolveFoot(
         FVector2D TargetXY  = NeutralXY + StrideDir * Foot.ActiveReach;
         FVector2D CurrentXY = FMath::Lerp(StartXY, TargetXY, Alpha);
 
+        float StepDist        = (NeutralXY - StartXY).Size();
+        float EffectiveHeight = FMath::Min(Foot.ActiveHeight, StepDist * 0.3f);
+
         OutGoal = FVector(
             CurrentXY.X,
             CurrentXY.Y,
-            Foot.NeutralGoal.Z + Foot.ActiveHeight * FMath::Sin(Alpha * PI)
+            Foot.NeutralGoal.Z + EffectiveHeight * FMath::Sin(Alpha * PI)
         );
 
-        float CurrentHeight = Foot.ActiveHeight * FMath::Sin(Alpha * PI);
+        float CurrentHeight = EffectiveHeight * FMath::Sin(Alpha * PI);
         float PitchDeg = FMath::Clamp(CurrentHeight / Foot.FootSize * Foot.PitchScale, 0.f, 45.f);
         OutRot = FRotator(-PitchDeg, 0.f, 0.f);
 
@@ -88,10 +91,10 @@ void UFootIKNodes::SolveFoot(
             Foot.AnchorWorldPos = ActorWorldPos;
             Foot.AnchorGoal     = Foot.NeutralGoal;
             OutGoal             = Foot.AnchorGoal;
-            OutRot              = FRotator::ZeroRotator;
-            Foot.bAnchored      = true;
-            Foot.bStriding      = false;
-            Foot.CooldownTimer  = Foot.ActiveCooldown;
+            OutRot                  = FRotator::ZeroRotator;
+            Foot.bAnchored          = true;
+            Foot.bStriding          = false;
+            Foot.CooldownTimer      = Foot.ActiveCooldown;
 
             Foot.ActiveDuration  = RandFromRange(Foot.StrideDuration);
             Foot.ActiveHeight    = RandFromRange(Foot.StrideHeight);

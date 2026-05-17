@@ -48,6 +48,7 @@ struct FFootIKState
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
     FVector AnchorGoal = FVector::ZeroVector;
 
+
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
     bool bAnchored = false;
 
