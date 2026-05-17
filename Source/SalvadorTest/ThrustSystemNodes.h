@@ -18,6 +18,9 @@ struct FThrustState
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Setup")
     AActor* VictimActor = nullptr;
 
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Setup")
+    TArray<FName> SkipPlantBones;
+
     // ── ABP goal variable names ──────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Goals")
     FName DomLocGoal;
@@ -61,6 +64,9 @@ struct FThrustState
     float StabDepth = 0.f;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
+    float ArmReachPercent = 0.5f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
     FRotator DomStartRotCS = FRotator::ZeroRotator;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
@@ -82,6 +88,9 @@ struct FThrustState
     // ── Plant state ──────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
     bool bPlanted = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    bool bSkipPlant = false;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
     FName ContactSocket;
@@ -122,6 +131,9 @@ struct FThrustState
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
     FVector PlantedTargetBoneWorld = FVector::ZeroVector;
 
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    FVector PlantedHandWorldPos = FVector::ZeroVector;
+
     // ── Hip follow ────────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Hip")
     FName HipLocGoal;
@@ -141,6 +153,7 @@ struct FThrustState
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
     float RecoverDuration = 0.1f;
+
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
     bool bRecovering = false;
@@ -168,6 +181,18 @@ struct FThrustState
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
     FVector RecoverHipStartPosCS = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    float RecoverArmElapsed = 0.f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    float ArmRecoverDuration = 0.3f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    float RecoverHipElapsed = 0.f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    float HipRecoverDuration = 0.3f;
 
     // ── Constraints ──────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Constraints")
@@ -198,6 +223,7 @@ public:
         FName SlaveLocGoal,
         FName SlaveRotGoal,
         const TArray<FName>& ContactSockets,
+        const TArray<FName>& SkipPlantBones,
         FVector HitLocation,
         FName TargetBoneName,
         float HitReachDelay,
@@ -208,8 +234,11 @@ public:
         FName LimitBone,
         float MaxDistFromBone,
         float StabDepth,
+        float ArmReachPercent,
         FName HipLocGoal,
         float HipFollowPercent,
+        float ArmRecoverDuration,
+        float HipRecoverDuration,
         bool bDebug
     );
 
@@ -224,6 +253,7 @@ public:
     static void ThrustPlant(
         UPARAM(ref) FThrustState& State,
         float DeltaTime,
+        bool& bOutBlacklisted,
         bool& bOutComplete
     );
 

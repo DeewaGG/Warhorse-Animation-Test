@@ -51,6 +51,7 @@ void UThrustSystemNodes::ThrustSetUp(
     FName SlaveLocGoal,
     FName SlaveRotGoal,
     const TArray<FName>& ContactSockets,
+    const TArray<FName>& SkipPlantBones,
     FVector HitLocation,
     FName TargetBoneName,
     float HitReachDelay,
@@ -61,8 +62,11 @@ void UThrustSystemNodes::ThrustSetUp(
     FName LimitBone,
     float MaxDistFromBone,
     float StabDepth,
+    float ArmReachPercent,
     FName HipLocGoal,
     float HipFollowPercent,
+    float ArmRecoverDuration,
+    float HipRecoverDuration,
     bool bDebug)
 {
     if (!AttackerActor || ContactSockets.Num() == 0 || HitReachDelay <= 0.f)
@@ -172,9 +176,14 @@ void UThrustSystemNodes::ThrustSetUp(
     State.LimitBone       = LimitBone;
     State.MaxDistFromBone = MaxDistFromBone;
     State.StabDepth         = StabDepth;
-    State.HipLocGoal        = HipLocGoal;
-    State.HipFollowPercent  = HipFollowPercent;
-    State.HipRestPosCS      = GetAnimVec(AnimInst, HipLocGoal);
+    State.SkipPlantBones    = SkipPlantBones;
+    State.bSkipPlant        = false;
+    State.ArmReachPercent   = ArmReachPercent;
+    State.HipLocGoal         = HipLocGoal;
+    State.HipFollowPercent   = HipFollowPercent;
+    State.HipRestPosCS       = GetAnimVec(AnimInst, HipLocGoal);
+    State.ArmRecoverDuration = ArmRecoverDuration > 0.f ? ArmRecoverDuration : RecoverDuration;
+    State.HipRecoverDuration = HipRecoverDuration > 0.f ? HipRecoverDuration : RecoverDuration;
     State.bDebug            = bDebug;
 
     if (bDebug)
@@ -226,9 +235,21 @@ void UThrustSystemNodes::ThrustTick(
     const FQuat    TargetQ   = State.DomTargetRotCS.Quaternion();
     const FRotator LerpedRot = FQuat::Slerp(StartQ, TargetQ, Alpha).Rotator();
 
-    SetAnimVec(AnimInst, State.DomLocGoal,   State.DomRestPos);
+    FVector DomGoalCS   = State.DomRestPos;
+    FVector SlaveGoalCS = State.SlaveRestPos;
+
+    if (State.ArmReachPercent > 0.f)
+    {
+        const FTransform CompTW = State.AttackerMesh->GetComponentTransform();
+        const FVector TargetCS  = CompTW.InverseTransformPosition(State.TargetBoneWorld);
+        const FVector ArmDelta  = (TargetCS - State.DomRestPos) * (State.ArmReachPercent * Alpha);
+        DomGoalCS   = State.DomRestPos   + ArmDelta;
+        SlaveGoalCS = State.SlaveRestPos + ArmDelta;
+    }
+
+    SetAnimVec(AnimInst, State.DomLocGoal,   DomGoalCS);
     SetAnimRot(AnimInst, State.DomRotGoal,   LerpedRot);
-    SetAnimVec(AnimInst, State.SlaveLocGoal, State.SlaveRestPos);
+    SetAnimVec(AnimInst, State.SlaveLocGoal, SlaveGoalCS);
     SetAnimRot(AnimInst, State.SlaveRotGoal, State.SlaveRestRot);
 
     --State.FramesRemaining;
@@ -239,16 +260,25 @@ void UThrustSystemNodes::ThrustTick(
         State.bActive         = false;
         State.bPlanted        = true;
         State.PlantedRotCS    = State.DomTargetRotCS;
+        State.bSkipPlant      = State.SkipPlantBones.Contains(State.TargetBone);
     }
 }
 
 void UThrustSystemNodes::ThrustPlant(
     FThrustState& State,
     float DeltaTime,
+    bool& bOutBlacklisted,
     bool& bOutComplete)
 {
-    bOutComplete = false;
+    bOutComplete    = false;
+    bOutBlacklisted = State.SkipPlantBones.Contains(State.TargetBone);
     if (!State.AttackerMesh) return;
+
+    if (State.SkipPlantBones.Contains(State.TargetBone))
+    {
+        bOutComplete = true;
+        return;
+    }
 
     UAnimInstance* AnimInst = State.AttackerMesh->GetAnimInstance();
     if (!AnimInst) return;
@@ -265,6 +295,7 @@ void UThrustSystemNodes::ThrustPlant(
         State.PlantedTargetBoneWorld = (VictimMesh && State.TargetBone != NAME_None)
             ? VictimMesh->GetBoneLocation(State.TargetBone) + State.TargetBoneOffset
             : State.TargetBoneWorld;
+        State.PlantedHandWorldPos = CompTW.TransformPosition(GetAnimVec(AnimInst, State.DomLocGoal));
 
         const FVector DomHandWorld = CompTW.TransformPosition(State.DomRestPos);
         const FQuat   DomRotWorld  = CompQ * State.PlantedRotCS.Quaternion();
@@ -284,7 +315,7 @@ void UThrustSystemNodes::ThrustPlant(
         : State.TargetBoneWorld;
 
     const FVector WoundDelta    = CurrentTargetWorld - State.PlantedTargetBoneWorld;
-    const FVector DesiredHandCS = State.DomRestPos + CompTW.InverseTransformVector(WoundDelta);
+    const FVector DesiredHandCS = CompTW.InverseTransformPosition(State.PlantedHandWorldPos + WoundDelta);
 
     if (State.MaxDistFromBone > 0.f && State.LimitBone != NAME_None)
     {
@@ -349,6 +380,7 @@ void UThrustSystemNodes::ThrustRecover(
     bool& bOutComplete)
 {
     bOutComplete = false;
+
     if (!State.AttackerMesh) return;
 
     UAnimInstance* AnimInst = State.AttackerMesh->GetAnimInstance();
@@ -361,7 +393,9 @@ void UThrustSystemNodes::ThrustRecover(
         State.RecoverDomStartRotCS   = GetAnimRot(AnimInst, State.DomRotGoal);
         State.RecoverSlaveStartPosCS = GetAnimVec(AnimInst, State.SlaveLocGoal);
         State.RecoverSlaveStartRotCS = GetAnimRot(AnimInst, State.SlaveRotGoal);
-        State.RecoverHipStartPosCS   = GetAnimVec(AnimInst, State.HipLocGoal);
+        State.RecoverArmElapsed    = 0.f;
+        State.RecoverHipStartPosCS = GetAnimVec(AnimInst, State.HipLocGoal);
+        State.RecoverHipElapsed    = 0.f;
 
         if (State.Montage)
         {
@@ -371,8 +405,10 @@ void UThrustSystemNodes::ThrustRecover(
 
             if (StartPos > KINDA_SMALL_NUMBER)
             {
-                State.MontagePos        = StartPos;
-                State.bMontageReversing = true;
+                State.MontagePos         = StartPos;
+                State.bMontageReversing  = true;
+                State.ArmRecoverDuration = FMath::Min(State.ArmRecoverDuration, StartPos);
+                State.HipRecoverDuration = FMath::Min(State.HipRecoverDuration, StartPos);
                 AnimInst->Montage_Play(State.Montage, -1.f,
                     EMontagePlayReturnType::MontageLength, StartPos, true);
             }
@@ -383,10 +419,10 @@ void UThrustSystemNodes::ThrustRecover(
             State.RecoverFramesTotal     = FMath::Max(1, FMath::RoundToInt(State.RecoverDuration / DeltaTime));
             State.RecoverFramesRemaining = State.RecoverFramesTotal;
         }
+
     }
 
-    float Alpha = 0.f;
-    bool  bDone = false;
+    bool bDone = false;
 
     if (State.bMontageReversing)
     {
@@ -396,31 +432,44 @@ void UThrustSystemNodes::ThrustRecover(
             AnimInst->Montage_SetPlayRate(State.Montage, 0.f);
             bDone = true;
         }
-        else
-        {
-            Alpha = CurPos / State.MontagePos;
-        }
     }
     else
     {
         --State.RecoverFramesRemaining;
         if (State.RecoverFramesRemaining <= 0)
             bDone = true;
-        else
-            Alpha = float(State.RecoverFramesRemaining) / float(State.RecoverFramesTotal);
     }
 
-    SetAnimVec(AnimInst, State.DomLocGoal,
-        FMath::Lerp(State.DomRestPos,   State.RecoverDomStartPosCS,   Alpha));
-    SetAnimRot(AnimInst, State.DomRotGoal,
-        FQuat::Slerp(State.DomRestRot.Quaternion(), State.RecoverDomStartRotCS.Quaternion(), Alpha).Rotator());
-    SetAnimVec(AnimInst, State.SlaveLocGoal,
-        FMath::Lerp(State.SlaveRestPos, State.RecoverSlaveStartPosCS, Alpha));
-    SetAnimRot(AnimInst, State.SlaveRotGoal,
-        FQuat::Slerp(State.SlaveRestRot.Quaternion(), State.RecoverSlaveStartRotCS.Quaternion(), Alpha).Rotator());
+    {
+        State.RecoverArmElapsed += DeltaTime;
+        const float ArmAlpha = FMath::Clamp(State.RecoverArmElapsed / State.ArmRecoverDuration, 0.f, 1.f);
+        SetAnimVec(AnimInst, State.DomLocGoal,
+            FMath::Lerp(State.RecoverDomStartPosCS,   State.DomRestPos,   ArmAlpha));
+        SetAnimRot(AnimInst, State.DomRotGoal,
+            FQuat::Slerp(State.RecoverDomStartRotCS.Quaternion(),   State.DomRestRot.Quaternion(),   ArmAlpha).Rotator());
+        SetAnimVec(AnimInst, State.SlaveLocGoal,
+            FMath::Lerp(State.RecoverSlaveStartPosCS, State.SlaveRestPos, ArmAlpha));
+        SetAnimRot(AnimInst, State.SlaveRotGoal,
+            FQuat::Slerp(State.RecoverSlaveStartRotCS.Quaternion(), State.SlaveRestRot.Quaternion(), ArmAlpha).Rotator());
+    }
     if (State.HipLocGoal != NAME_None)
-        SetAnimVec(AnimInst, State.HipLocGoal,
-            FMath::Lerp(State.HipRestPosCS, State.RecoverHipStartPosCS, Alpha));
+    {
+        State.RecoverHipElapsed += DeltaTime;
+        const float   HipAlpha   = FMath::Clamp(State.RecoverHipElapsed / State.HipRecoverDuration, 0.f, 1.f);
+        const FVector HipCurrent = FMath::Lerp(State.RecoverHipStartPosCS, State.HipRestPosCS, HipAlpha);
+        SetAnimVec(AnimInst, State.HipLocGoal, HipCurrent);
+
+        if (State.bDebug)
+        {
+            if (GEngine)
+                GEngine->AddOnScreenDebugMessage(-1, 0.f, FColor::Cyan,
+                    FString::Printf(TEXT("HipRecover | Alpha=%.3f | Cur=(%.1f,%.1f,%.1f) | Target=(%.1f,%.1f,%.1f)"),
+                        HipAlpha,
+                        HipCurrent.X, HipCurrent.Y, HipCurrent.Z,
+                        State.HipRestPosCS.X, State.HipRestPosCS.Y, State.HipRestPosCS.Z));
+
+        }
+    }
 
     if (bDone)
     {
