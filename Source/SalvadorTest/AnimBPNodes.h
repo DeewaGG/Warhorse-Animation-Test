@@ -184,6 +184,9 @@ struct FThrustState
     FVector SocketToHandOffsetCS = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    FVector SocketRelativeLocation = FVector::ZeroVector;  // socket offset in hand-bone local space
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
     FRotator PlantedRotCS = FRotator::ZeroRotator;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")

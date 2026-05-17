@@ -174,6 +174,15 @@ void UAnimBPNodes::ThrustSetUp(
     State.SlaveRestPos = GetAnimVec(AnimInst, SlaveLocGoal);
     State.SlaveRestRot = GetAnimRot(AnimInst, SlaveRotGoal);
 
+    // Socket offset in hand-bone local frame — lets ThrustPlant analytically compute the socket
+    // CS position at any rotation without reading the skeleton (avoids one-frame-behind timing).
+    {
+        const FTransform CompTW_S   = AttackerMesh->GetComponentTransform();
+        const FVector HandWorldRest = CompTW_S.TransformPosition(State.DomRestPos);
+        const FQuat   HandRotRest   = CompTW_S.GetRotation() * State.DomRestRot.Quaternion();
+        State.SocketRelativeLocation = HandRotRest.Inverse().RotateVector(ClosestSocketWorld - HandWorldRest);
+    }
+
     // Rotation delta: current socket direction → target direction (world space)
     const FVector CurrentDir   = (ClosestSocketWorld - PivotWorld).GetSafeNormal();
     const FVector RawTargetDir = (TargetWorld        - PivotWorld).GetSafeNormal();
@@ -319,13 +328,15 @@ void UAnimBPNodes::ThrustPlant(
     // First frame: compute socket→hand offset in CS (constant for this plant)
     if (State.FramesRemaining == 0)
     {
-        const FVector SocketCS         = CompTW.InverseTransformPosition(
-            State.AttackerMesh->GetSocketLocation(State.ContactSocket));
-        State.SocketToHandOffsetCS     = GetAnimVec(AnimInst, State.DomLocGoal) - SocketCS;
+        // Capture wound world position at plant entry — delta tracking guarantees the first
+        // Plant frame sets DomLocGoal = DomRestPos (identical to ThrustTick's last frame, no jump).
+        State.PlantedTargetBoneWorld = (VictimMesh && State.TargetBone != NAME_None)
+            ? VictimMesh->GetBoneLocation(State.TargetBone) + State.TargetBoneOffset
+            : State.TargetBoneWorld;
 
         // Slave hand captured in dom-hand local space so it stays glued to the sword
-        const FVector DomHandWorld  = CompTW.TransformPosition(GetAnimVec(AnimInst, State.DomLocGoal));
-        const FQuat   DomRotWorld   = CompQ * State.PlantedRotCS.Quaternion();
+        const FVector DomHandWorld = CompTW.TransformPosition(State.DomRestPos);
+        const FQuat   DomRotWorld  = CompQ * State.PlantedRotCS.Quaternion();
         const FTransform DomHandTW(DomRotWorld, DomHandWorld);
 
         const FVector SlaveHandWorld = CompTW.TransformPosition(GetAnimVec(AnimInst, State.SlaveLocGoal));
@@ -337,14 +348,15 @@ void UAnimBPNodes::ThrustPlant(
         State.FramesRemaining = -1;
     }
 
-    // Socket target: victim surface point or fixed world position
+    // Current wound world position
     const FVector CurrentTargetWorld = (VictimMesh && State.TargetBone != NAME_None)
         ? VictimMesh->GetBoneLocation(State.TargetBone) + State.TargetBoneOffset
         : State.TargetBoneWorld;
 
-    // Derive hand CS so the socket lands exactly on CurrentTargetWorld
-    const FVector DesiredSocketCS = CompTW.InverseTransformPosition(CurrentTargetWorld);
-    const FVector DesiredHandCS   = DesiredSocketCS + State.SocketToHandOffsetCS;
+    // Delta from entry wound position → hand tracks ragdoll movement without jumping on entry.
+    // Frame 0: delta = 0 → DesiredHandCS = DomRestPos (same as ThrustTick last frame).
+    const FVector WoundDelta    = CurrentTargetWorld - State.PlantedTargetBoneWorld;
+    const FVector DesiredHandCS = State.DomRestPos + CompTW.InverseTransformVector(WoundDelta);
 
     // Distance limit
     if (State.MaxDistFromBone > 0.f && State.LimitBone != NAME_None)
