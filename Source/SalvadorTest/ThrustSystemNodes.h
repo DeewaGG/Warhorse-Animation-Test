@@ -1,107 +1,10 @@
 #pragma once
 #include "CoreMinimal.h"
-#include "Curves/CurveFloat.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
 #include "Animation/AnimMontage.h"
-#include "AnimBPNodes.generated.h"
-
-// ─────────────────────────────────────────────
-// CURVE SAMPLER
-// ─────────────────────────────────────────────
-
-USTRUCT(BlueprintType)
-struct FCurveSamplerState
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "CurveSampler")
-    float Elapsed = 0.f;
-};
-
-// ─────────────────────────────────────────────
-// FOOT IK
-// ─────────────────────────────────────────────
-
-USTRUCT(BlueprintType)
-struct FFootIKState
-{
-    GENERATED_BODY()
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
-    USkeletalMeshComponent* Mesh = nullptr;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
-    FName FootBone = NAME_None;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
-    FName HipBone = NAME_None;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
-    FVector NeutralGoal = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
-    FVector2D StrideThreshold = FVector2D(40.f, 60.f);
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
-    FVector2D StrideDuration = FVector2D(0.25f, 0.4f);
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
-    FVector2D StrideHeight = FVector2D(8.f, 15.f);
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
-    FVector2D StrideCooldown = FVector2D(0.1f, 0.2f);
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
-    FVector2D StrideReach = FVector2D(0.f, 0.f);
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
-    float FootSize = 25.f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
-    float PitchScale = 1.f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    FVector AnchorWorldPos = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    FVector AnchorGoal = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    bool bAnchored = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    bool bStriding = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    FVector StrideStartGoal = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    float StrideElapsed = 0.f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    float CooldownTimer = 0.f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    float ActiveDuration = 0.3f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    float ActiveHeight = 10.f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    float ActiveReach = 0.f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    float ActiveCooldown = 0.15f;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    float ActiveThreshold = 50.f;
-};
-
-// ─────────────────────────────────────────────
-// THRUST SYSTEM
-// ─────────────────────────────────────────────
+#include "ThrustSystemNodes.generated.h"
 
 USTRUCT(BlueprintType)
 struct FThrustState
@@ -152,10 +55,10 @@ struct FThrustState
     FVector TargetBoneWorld = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
-    FVector TargetBoneOffset = FVector::ZeroVector;  // surface hit point minus bone world at setup
+    FVector TargetBoneOffset = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
-    float StabDepth = 0.f;  // cm past the surface hit point along the trace direction
+    float StabDepth = 0.f;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
     FRotator DomStartRotCS = FRotator::ZeroRotator;
@@ -187,7 +90,7 @@ struct FThrustState
     FVector SocketToHandOffsetCS = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
-    FVector SocketRelativeLocation = FVector::ZeroVector;  // socket offset in hand-bone local space
+    FVector SocketRelativeLocation = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
     FRotator PlantedRotCS = FRotator::ZeroRotator;
@@ -216,9 +119,18 @@ struct FThrustState
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
     FRotator SlaveRotInDomHandLocal = FRotator::ZeroRotator;
 
-    // Victim bone world position captured at plant start — tracking origin
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
     FVector PlantedTargetBoneWorld = FVector::ZeroVector;
+
+    // ── Hip follow ────────────────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Hip")
+    FName HipLocGoal;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Hip")
+    float HipFollowPercent = 0.f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Hip")
+    FVector HipRestPosCS = FVector::ZeroVector;
 
     // ── Recover ──────────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
@@ -254,43 +166,29 @@ struct FThrustState
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
     FRotator RecoverSlaveStartRotCS = FRotator::ZeroRotator;
 
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    FVector RecoverHipStartPosCS = FVector::ZeroVector;
+
     // ── Constraints ──────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Constraints")
     FName LimitBone = TEXT("spine_03");
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Constraints")
-    float MaxDistFromBone = 0.f;  // 0 = unlimited
+    float MaxDistFromBone = 0.f;
 
     // ── Debug ────────────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Debug")
     bool bDebug = false;
 };
 
-// ─────────────────────────────────────────────
-// LIBRARY
-// ─────────────────────────────────────────────
-
 UCLASS()
-class SALVADORTEST_API UAnimBPNodes : public UBlueprintFunctionLibrary
+class SALVADORTEST_API UThrustSystemNodes : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 
 public:
 
-    // ── Curve ────────────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|Curve")
-    static void SampleCurve(
-        UPARAM(ref) FCurveSamplerState& State,
-        UCurveFloat* Curve,
-        float Duration,
-        float DeltaTime,
-        bool bReset,
-        float& OutValue,
-        bool& bOutFinished
-    );
-
-    // ── Thrust System ────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|ThrustSystem")
+    UFUNCTION(BlueprintCallable, Category = "ThrustSystem")
     static void ThrustSetUp(
         UPARAM(ref) FThrustState& State,
         AActor* AttackerActor,
@@ -310,83 +208,34 @@ public:
         FName LimitBone,
         float MaxDistFromBone,
         float StabDepth,
+        FName HipLocGoal,
+        float HipFollowPercent,
         bool bDebug
     );
 
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|ThrustSystem")
-    static void ThrustRecover(
-        UPARAM(ref) FThrustState& State,
-        float DeltaTime,
-        bool& bOutComplete
-    );
-
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|ThrustSystem")
+    UFUNCTION(BlueprintCallable, Category = "ThrustSystem")
     static void ThrustTick(
         UPARAM(ref) FThrustState& State,
         float DeltaTime,
         bool& bOutComplete
     );
 
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|ThrustSystem")
+    UFUNCTION(BlueprintCallable, Category = "ThrustSystem")
     static void ThrustPlant(
         UPARAM(ref) FThrustState& State,
         float DeltaTime,
         bool& bOutComplete
     );
 
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|ThrustSystem")
+    UFUNCTION(BlueprintCallable, Category = "ThrustSystem")
+    static void ThrustRecover(
+        UPARAM(ref) FThrustState& State,
+        float DeltaTime,
+        bool& bOutComplete
+    );
+
+    UFUNCTION(BlueprintCallable, Category = "ThrustSystem")
     static void ThrustEnd(
         UPARAM(ref) FThrustState& State
-    );
-
-    // ── Foot IK ──────────────────────────────────────────────────────────────
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|FootIK")
-    static void SetupFootIK(
-        UPARAM(ref) FFootIKState& Foot,
-        USkeletalMeshComponent* Mesh,
-        FName FootBone,
-        FName HipBone,
-        FVector ActorWorldPos,
-        FVector CurrentGoal,
-        FVector2D StrideThreshold,
-        FVector2D StrideDuration,
-        FVector2D StrideHeight,
-        FVector2D StrideCooldown,
-        FVector2D StrideReach,
-        float FootSize,
-        float PitchScale
-    );
-
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|FootIK")
-    static void SolveFootIK(
-        UPARAM(ref) FFootIKState& LeftFoot,
-        UPARAM(ref) FFootIKState& RightFoot,
-        FVector ActorWorldPos,
-        FRotator ActorWorldRot,
-        float DeltaTime,
-        FVector& OutLeftGoal,
-        FVector& OutRightGoal,
-        FRotator& OutLeftRot,
-        FRotator& OutRightRot
-    );
-
-    UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|FootIK")
-    static bool AreFeetRepositioned(
-        const FFootIKState& LeftFoot,
-        const FFootIKState& RightFoot
-    );
-
-private:
-
-    static void SolveFoot(
-        FFootIKState& Foot,
-        FVector ActorWorldPos,
-        FRotator ActorWorldRot,
-        FVector FootBoneWorld,
-        FVector HipBoneWorld,
-        float DeltaTime,
-        bool bAnyFootBusy,
-        FVector& OutGoal,
-        FRotator& OutRot
     );
 };
