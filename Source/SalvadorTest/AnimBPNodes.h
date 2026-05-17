@@ -56,6 +56,12 @@ struct FFootIKState
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
     FVector2D StrideReach = FVector2D(0.f, 0.f);
 
+    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
+    float FootSize = 25.f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
+    float PitchScale = 1.f;
+
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
     FVector AnchorWorldPos = FVector::ZeroVector;
 
@@ -67,9 +73,6 @@ struct FFootIKState
 
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
     bool bStriding = false;
-
-    UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
-    bool bForceStride = true;
 
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
     FVector StrideStartGoal = FVector::ZeroVector;
@@ -350,7 +353,8 @@ public:
         FVector2D StrideHeight,
         FVector2D StrideCooldown,
         FVector2D StrideReach,
-        bool bForceFirstStride
+        float FootSize,
+        float PitchScale
     );
 
     UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|FootIK")
@@ -361,7 +365,9 @@ public:
         FRotator ActorWorldRot,
         float DeltaTime,
         FVector& OutLeftGoal,
-        FVector& OutRightGoal
+        FVector& OutRightGoal,
+        FRotator& OutLeftRot,
+        FRotator& OutRightRot
     );
 
     UFUNCTION(BlueprintCallable, Category = "AnimBPNodes|FootIK")
@@ -380,6 +386,7 @@ private:
         FVector HipBoneWorld,
         float DeltaTime,
         bool bAnyFootBusy,
-        FVector& OutGoal
+        FVector& OutGoal,
+        FRotator& OutRot
     );
 };

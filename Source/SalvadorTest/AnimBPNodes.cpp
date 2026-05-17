@@ -520,7 +520,8 @@ void UAnimBPNodes::SetupFootIK(
     FVector2D StrideHeight,
     FVector2D StrideCooldown,
     FVector2D StrideReach,
-    bool bForceFirstStride)
+    float FootSize,
+    float PitchScale)
 {
     Foot.Mesh = Mesh;
     Foot.FootBone = FootBone;
@@ -531,20 +532,23 @@ void UAnimBPNodes::SetupFootIK(
     Foot.StrideHeight = StrideHeight;
     Foot.StrideCooldown = StrideCooldown;
     Foot.StrideReach = StrideReach;
+    Foot.FootSize    = FMath::Max(FootSize, 1.f);
+    Foot.PitchScale  = PitchScale;
 
-    Foot.AnchorWorldPos = ActorWorldPos;
-    Foot.AnchorGoal = CurrentGoal;
-    Foot.bAnchored = true;
-    Foot.bStriding = false;
-    Foot.bForceStride = bForceFirstStride;
-    Foot.StrideElapsed = 0.f;
-    Foot.CooldownTimer = 0.f;
+    Foot.AnchorWorldPos  = ActorWorldPos;
+    Foot.AnchorGoal      = CurrentGoal;
+    Foot.bAnchored       = false;
+    Foot.bStriding       = true;
+    Foot.StrideStartGoal = CurrentGoal;
+    Foot.StrideElapsed   = 0.f;
+    Foot.CooldownTimer   = 0.f;
 
     Foot.ActiveDuration  = RandFromRange(StrideDuration);
     Foot.ActiveHeight    = RandFromRange(StrideHeight);
     Foot.ActiveReach     = RandFromRange(StrideReach);
     Foot.ActiveCooldown  = RandFromRange(StrideCooldown);
     Foot.ActiveThreshold = RandFromRange(StrideThreshold);
+
 }
 
 void UAnimBPNodes::SolveFoot(
@@ -555,9 +559,11 @@ void UAnimBPNodes::SolveFoot(
     FVector HipBoneWorld,
     float DeltaTime,
     bool bAnyFootBusy,
-    FVector& OutGoal)
+    FVector& OutGoal,
+    FRotator& OutRot)
 {
     OutGoal = Foot.AnchorGoal;
+    OutRot  = FRotator::ZeroRotator;
 
     if (Foot.bStriding)
     {
@@ -577,10 +583,16 @@ void UAnimBPNodes::SolveFoot(
             Foot.NeutralGoal.Z + Foot.ActiveHeight * FMath::Sin(Alpha * PI)
         );
 
+        float CurrentHeight = Foot.ActiveHeight * FMath::Sin(Alpha * PI);
+        float PitchDeg = FMath::Clamp(CurrentHeight / Foot.FootSize * Foot.PitchScale, 0.f, 45.f);
+        OutRot = FRotator(-PitchDeg, 0.f, 0.f);
+
         if (Alpha >= 1.f)
         {
             Foot.AnchorWorldPos = ActorWorldPos;
-            Foot.AnchorGoal     = FVector(TargetXY.X, TargetXY.Y, Foot.NeutralGoal.Z);
+            Foot.AnchorGoal     = Foot.NeutralGoal;
+            OutGoal             = Foot.AnchorGoal;
+            OutRot              = FRotator::ZeroRotator;
             Foot.bAnchored      = true;
             Foot.bStriding      = false;
             Foot.CooldownTimer  = Foot.ActiveCooldown;
@@ -616,12 +628,11 @@ void UAnimBPNodes::SolveFoot(
                 FootBoneWorld.X - HipBoneWorld.X,
                 FootBoneWorld.Y - HipBoneWorld.Y).Size();
 
-            if (Foot.bForceStride || DistToHip > Foot.ActiveThreshold)
+            if (DistToHip > Foot.ActiveThreshold)
             {
                 Foot.StrideStartGoal = OutGoal;
                 Foot.StrideElapsed   = 0.f;
                 Foot.bStriding       = true;
-                Foot.bForceStride    = false;
             }
         }
     }
@@ -634,10 +645,14 @@ void UAnimBPNodes::SolveFootIK(
     FRotator ActorWorldRot,
     float DeltaTime,
     FVector& OutLeftGoal,
-    FVector& OutRightGoal)
+    FVector& OutRightGoal,
+    FRotator& OutLeftRot,
+    FRotator& OutRightRot)
 {
     OutLeftGoal  = LeftFoot.AnchorGoal;
     OutRightGoal = RightFoot.AnchorGoal;
+    OutLeftRot   = FRotator::ZeroRotator;
+    OutRightRot  = FRotator::ZeroRotator;
 
     if (!LeftFoot.Mesh)
         return;
@@ -656,26 +671,26 @@ void UAnimBPNodes::SolveFootIK(
     if (LeftDistToHip >= RightDistToHip)
     {
         SolveFoot(LeftFoot, ActorWorldPos, ActorWorldRot,
-            LeftBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutLeftGoal);
+            LeftBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutLeftGoal, OutLeftRot);
 
         bAnyBusy = LeftFoot.bStriding  || RightFoot.bStriding
                 || LeftFoot.CooldownTimer > 0.f
                 || RightFoot.CooldownTimer > 0.f;
 
         SolveFoot(RightFoot, ActorWorldPos, ActorWorldRot,
-            RightBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutRightGoal);
+            RightBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutRightGoal, OutRightRot);
     }
     else
     {
         SolveFoot(RightFoot, ActorWorldPos, ActorWorldRot,
-            RightBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutRightGoal);
+            RightBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutRightGoal, OutRightRot);
 
         bAnyBusy = LeftFoot.bStriding  || RightFoot.bStriding
                 || LeftFoot.CooldownTimer > 0.f
                 || RightFoot.CooldownTimer > 0.f;
 
         SolveFoot(LeftFoot, ActorWorldPos, ActorWorldRot,
-            LeftBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutLeftGoal);
+            LeftBoneWorld, HipBoneWorld, DeltaTime, bAnyBusy, OutLeftGoal, OutLeftRot);
     }
 }
 
