@@ -26,6 +26,7 @@ void UAnimInstanceBase::NativeUpdateAnimation(float DeltaSeconds)
     IsFalling();
     SyncPlayableCharacterData();
     ComputeTargetAlpha();
+    ComputeSpineLookAt();
     ComputeHandHeightIK();
     BodyIK(DeltaSeconds);
 }
@@ -118,6 +119,33 @@ void UAnimInstanceBase::BodyIK(float DeltaSeconds)
     TraceFootIK(FootR, DeltaSeconds, RightFootIKPosition, RightFootRot, RightFootIKAlpha);
 
     BodyIKOffset = FVector(0.f, 0.f, FMath::Min(RightFootIKPosition.Z, LeftFootIKPosition.Z));
+}
+
+void UAnimInstanceBase::ComputeSpineLookAt()
+{
+    if (SpineLookAtAlpha <= 0.f || SpineLookAtWorldPos.IsZero())
+    {
+        SpineLookAtAdditiveRot = FRotator::ZeroRotator;
+        return;
+    }
+
+    APawn* Pawn = TryGetPawnOwner();
+    if (!Pawn)
+    {
+        SpineLookAtAdditiveRot = FRotator::ZeroRotator;
+        return;
+    }
+
+    const FVector ToTarget = (SpineLookAtWorldPos - Pawn->GetActorLocation()).GetSafeNormal();
+    const FVector LocalDir = Pawn->GetActorTransform().InverseTransformVectorNoScale(ToTarget);
+
+    const float Yaw   = FMath::RadiansToDegrees(FMath::Atan2(LocalDir.Y, LocalDir.X));
+    const float Pitch = FMath::RadiansToDegrees(
+        FMath::Atan2(LocalDir.Z, FVector2D(LocalDir.X, LocalDir.Y).Size()));
+
+    const float ClampedPitch = FMath::Clamp(Pitch * SpineLookInfluence.Y, SpineLookRotMin.Pitch, SpineLookRotMax.Pitch);
+    const float ClampedYaw   = FMath::Clamp(Yaw   * SpineLookInfluence.Z, SpineLookRotMin.Yaw,   SpineLookRotMax.Yaw);
+    SpineLookAtAdditiveRot   = FRotator(ClampedPitch, ClampedYaw, 0.f) * SpineLookAtAlpha;
 }
 
 void UAnimInstanceBase::ComputeHandHeightIK()

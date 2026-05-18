@@ -18,6 +18,8 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
+    void SetSpineLookAtTarget(FVector WorldPos) { SpineLookAtWorldPos = WorldPos; }
+
     UPROPERTY(BlueprintReadWrite, Category = "State")
     bool bIsStunned = false;
 
@@ -85,6 +87,24 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "Combat|IK")
     FVector PelvisAdditiveOffset = FVector::ZeroVector;
 
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|SpineLook")
+    float SpineLookAtAlpha = 0.f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|SpineLook")
+    FRotator SpineLookAtAdditiveRot = FRotator::ZeroRotator;
+
+    // Per-axis rotation scale: X = Roll, Y = Pitch, Z = Yaw
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Combat|SpineLook",
+              meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    FVector SpineLookInfluence = FVector(0.f, 0.4f, 0.6f);
+
+    // Clamp on the final additive rotation (degrees, applied before alpha scale)
+    UPROPERTY(EditDefaultsOnly, Category = "Combat|SpineLook")
+    FRotator SpineLookRotMin = FRotator(-30.f, -50.f, 0.f);
+
+    UPROPERTY(EditDefaultsOnly, Category = "Combat|SpineLook")
+    FRotator SpineLookRotMax = FRotator(30.f, 50.f, 0.f);
+
 protected:
 
     // ── References ───────────────────────────────────────────────────────────
@@ -135,6 +155,9 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float TargetOriMinInfluence = 0.8f;
 
+    UPROPERTY(EditDefaultsOnly, Category = "Combat|SpineLook")
+    FName PelvisBone = TEXT("pelvis");
+
     // ── Foot IK ──────────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
     FName FootL;
@@ -163,6 +186,8 @@ protected:
 private:
     UPROPERTY() TObjectPtr<APlayableCharacter> OwningPlayableCharacter;
 
+    FVector SpineLookAtWorldPos = FVector::ZeroVector;
+
     void GetMovComp();
     void VelocityAndSpeed();
     void CalculateDirections();
@@ -172,5 +197,6 @@ private:
     void TraceFootIK(FName FootBone, float DeltaSeconds, FVector& OutPos, FRotator& OutRot, float& OutAlpha);
     void SyncPlayableCharacterData();
     void ComputeTargetAlpha();
+    void ComputeSpineLookAt();
     void ComputeHandHeightIK();
 };

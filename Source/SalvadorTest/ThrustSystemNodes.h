@@ -201,6 +201,18 @@ struct FThrustState
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Constraints")
     float MaxDistFromBone = 0.f;
 
+    // ── Additive goals context ────────────────────────────────────────────────
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Additive")
+    FName PelvisBoneName = TEXT("pelvis");
+
+    // FRotator variable name on the AnimInstance holding the spine additive rotation
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Additive")
+    FName SpineRotVarName;
+
+    // float variable name on the AnimInstance holding the spine look-at alpha
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Additive")
+    FName SpineAlphaVarName;
+
     // ── Debug ────────────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Debug")
     bool bDebug = false;
@@ -239,7 +251,10 @@ public:
         float HipFollowPercent,
         float ArmRecoverDuration,
         float HipRecoverDuration,
-        bool bDebug
+        bool bDebug,
+        FName PelvisBoneName = TEXT("pelvis"),
+        FName SpineRotVarName = NAME_None,
+        FName SpineAlphaVarName = NAME_None
     );
 
     UFUNCTION(BlueprintCallable, Category = "ThrustSystem")

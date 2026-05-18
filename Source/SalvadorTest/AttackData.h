@@ -26,6 +26,9 @@ struct FTargetSlotIKData
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
     FHandIKSlotData SlaveHand;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    float ImpulseMagnitude = 0.f;
 };
 
 USTRUCT(BlueprintType)
