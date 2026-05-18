@@ -2,7 +2,6 @@
 #include "AnimInstanceBase.h"
 #include "TargetingSystemComponent.h"
 #include "TargetComponent.h"
-#include "TargetSlotIKComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -15,7 +14,7 @@ APlayableCharacter::APlayableCharacter()
     PrimaryActorTick.bCanEverTick = true;
 
     // ── Character movement ────────────────────────────────────────────────────
-    bUseControllerRotationYaw = false;
+    bUseControllerRotationYaw = true;
 
     UCharacterMovementComponent* Move = GetCharacterMovement();
     Move->BrakingFrictionFactor            = 1.f;
@@ -23,8 +22,7 @@ APlayableCharacter::APlayableCharacter()
     Move->MaxWalkSpeed                     = 400.f;
     Move->MinAnalogWalkSpeed               = 20.f;
     Move->BrakingDecelerationWalking       = 2000.f;
-    Move->bOrientRotationToMovement        = true;
-    Move->RotationRate                     = FRotator::ZeroRotator;
+    Move->bOrientRotationToMovement        = false;
     Move->PerchRadiusThreshold             = 15.f;
 
     // ── Camera boom ───────────────────────────────────────────────────────────
@@ -53,7 +51,8 @@ void APlayableCharacter::BeginPlay()
         if (UEnhancedInputLocalPlayerSubsystem* Sub =
             ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
         {
-            Sub->AddMappingContext(DefaultMappingContext, 0);
+            if (DefaultMappingContext)
+                Sub->AddMappingContext(DefaultMappingContext, 0);
         }
     }
 
@@ -69,13 +68,25 @@ void APlayableCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
     UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent);
     if (!EIC) return;
 
-    EIC->BindAction(IA_Move,       ETriggerEvent::Triggered, this, &APlayableCharacter::OnMove);
-    EIC->BindAction(IA_MouseLook,  ETriggerEvent::Triggered, this, &APlayableCharacter::OnMouseLook);
-    EIC->BindAction(IA_MouseLook,  ETriggerEvent::Completed, this, &APlayableCharacter::OnMouseLookCompleted);
-    EIC->BindAction(IA_Attack,     ETriggerEvent::Started,   this, &APlayableCharacter::OnAttackStarted);
-    EIC->BindAction(IA_Aim,        ETriggerEvent::Started,   this, &APlayableCharacter::OnAimStarted);
-    EIC->BindAction(IA_Aim,        ETriggerEvent::Canceled,  this, &APlayableCharacter::OnAimCanceled);
-    EIC->BindAction(IA_Aim,        ETriggerEvent::Completed, this, &APlayableCharacter::OnAimCompleted);
+    if (IA_Move)
+    {
+        EIC->BindAction(IA_Move, ETriggerEvent::Triggered, this, &APlayableCharacter::OnMove);
+    }
+    if (IA_MouseLook)
+    {
+        EIC->BindAction(IA_MouseLook, ETriggerEvent::Triggered, this, &APlayableCharacter::OnMouseLook);
+        EIC->BindAction(IA_MouseLook, ETriggerEvent::Completed, this, &APlayableCharacter::OnMouseLookCompleted);
+    }
+    if (IA_Attack)
+    {
+        EIC->BindAction(IA_Attack, ETriggerEvent::Started, this, &APlayableCharacter::OnAttackStarted);
+    }
+    if (IA_Aim)
+    {
+        EIC->BindAction(IA_Aim, ETriggerEvent::Started,   this, &APlayableCharacter::OnAimStarted);
+        EIC->BindAction(IA_Aim, ETriggerEvent::Canceled,  this, &APlayableCharacter::OnAimCanceled);
+        EIC->BindAction(IA_Aim, ETriggerEvent::Completed, this, &APlayableCharacter::OnAimCompleted);
+    }
 }
 
 void APlayableCharacter::OnMove(const FInputActionValue& Value)
@@ -135,20 +146,18 @@ void APlayableCharacter::OnAttackStarted(const FInputActionValue& Value)
     }
 
     TargetPos = CurrentTarget->GetComponentLocation();
-
-    if (ABP)
-        ABP->LeftHandIKPosition = UTargetSlotIKNodes::GetHandHeightOffset(GetMesh(), TargetPos, TEXT("hand_r"));
-
     TargetingSystem->OnAttackStart();
 
     const float Duration = PlayAnimMontage(AttackMontage);
-    GetWorldTimerManager().SetTimer(AttackTimerHandle, this, &APlayableCharacter::FinishAttack, Duration, false);
+    if (Duration > 0.f)
+        GetWorldTimerManager().SetTimer(AttackTimerHandle, this, &APlayableCharacter::FinishAttack, Duration, false);
+    else
+        FinishAttack();
 }
 
 void APlayableCharacter::FinishAttack()
 {
     TargetingSystem->OnAttackEnd();
-    if (ABP) ABP->LeftHandIKPosition = FVector::ZeroVector;
 }
 
 void APlayableCharacter::OnAimStarted(const FInputActionValue& Value)

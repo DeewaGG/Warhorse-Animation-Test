@@ -118,7 +118,7 @@ void UHitReactionComponent::SetupVarsForSim()
     const FVector CapsuleLoc = BPVictim ? BPVictim->GetActorLocation() : FVector::ZeroVector;
     PushGoal = FVector2D(CapsuleLoc + HitDir * 200.0);
 
-    if (ABP)
+    if (ABP && Mesh)
     {
         ABP->bIsStunned     = true;
         RightHandIKPosition = ABP->RightHandIKPosition;
@@ -303,7 +303,7 @@ void UHitReactionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
         {
             bSimFinishTriggered = true;
 
-            if (ABP)
+            if (ABP && Mesh)
             {
                 FrozenLeftFootIK   = ABP->LeftFootIKPosition;
                 FrozenRightFootIK  = ABP->RightFootIKPosition;

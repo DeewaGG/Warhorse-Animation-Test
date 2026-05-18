@@ -26,17 +26,15 @@ void UAnimInstanceBase::NativeUpdateAnimation(float DeltaSeconds)
     IsFalling();
     SyncPlayableCharacterData();
     ComputeTargetAlpha();
+    ComputeHandHeightIK();
     BodyIK(DeltaSeconds);
 }
 
 void UAnimInstanceBase::GetMovComp()
 {
     ACharacter* Character = Cast<ACharacter>(GetOwningActor());
-    if (!Character)
-    {
-        UE_LOG(LogTemp, Error, TEXT("AnimInstanceBase: owning actor is not a Character"));
-        return;
-    }
+    if (!Character) return;
+
     MovementComponent        = Character->GetCharacterMovement();
     OwnerMesh                = Character->GetMesh();
     OwningPlayableCharacter  = Cast<APlayableCharacter>(Character);
@@ -102,8 +100,10 @@ void UAnimInstanceBase::BodyIK(float DeltaSeconds)
     {
         LeftFootIKPosition  = FVector::ZeroVector;
         LeftFootRot         = FRotator::ZeroRotator;
+        LeftFootIKAlpha     = 0.f;
         RightFootIKPosition = FVector::ZeroVector;
         RightFootRot        = FRotator::ZeroRotator;
+        RightFootIKAlpha    = 0.f;
         LeftHandIKPosition  = FVector::ZeroVector;
         RightHandIKPosition = FVector::ZeroVector;
         BodyIKOffset        = FVector::ZeroVector;
@@ -112,13 +112,29 @@ void UAnimInstanceBase::BodyIK(float DeltaSeconds)
 
     if (!OwnerMesh) return;
 
-    TraceFootIK(FootL, DeltaSeconds, LeftFootIKPosition,  LeftFootRot);
-    TraceFootIK(FootR, DeltaSeconds, RightFootIKPosition, RightFootRot);
+    TraceFootIK(FootL, DeltaSeconds, LeftFootIKPosition,  LeftFootRot,  LeftFootIKAlpha);
+    TraceFootIK(FootR, DeltaSeconds, RightFootIKPosition, RightFootRot, RightFootIKAlpha);
 
     BodyIKOffset = FVector(0.f, 0.f, FMath::Min(RightFootIKPosition.Z, LeftFootIKPosition.Z));
 }
 
-void UAnimInstanceBase::TraceFootIK(FName FootBone, float DeltaSeconds, FVector& OutPos, FRotator& OutRot)
+void UAnimInstanceBase::ComputeHandHeightIK()
+{
+    const float LerpAttack = GetCurveValue(TEXT("LerpAttack"));
+    if (LerpAttack <= 0.f || TargetPos.IsZero() || !OwnerMesh)
+    {
+        HandHeightAdditiveOffset = FVector::ZeroVector;
+        return;
+    }
+
+    const float   PelvisWorldZ = OwnerMesh->GetBoneLocation(PelvisBone).Z;
+    const float   DeltaWorld   = TargetPos.Z - PelvisWorldZ;
+    const float   ClampedDelta = FMath::Clamp(DeltaWorld, -HandHeightMaxOffset, HandHeightMaxOffset);
+    const FVector DeltaCS      = OwnerMesh->GetComponentTransform().InverseTransformVector(FVector(0.f, 0.f, ClampedDelta));
+    HandHeightAdditiveOffset   = FVector(0.f, 0.f, DeltaCS.Z * LerpAttack);
+}
+
+void UAnimInstanceBase::TraceFootIK(FName FootBone, float DeltaSeconds, FVector& OutPos, FRotator& OutRot, float& OutAlpha)
 {
     if (FootBone.IsNone()) return;
 
@@ -128,15 +144,19 @@ void UAnimInstanceBase::TraceFootIK(FName FootBone, float DeltaSeconds, FVector&
     const FVector Start(FootLoc.X, FootLoc.Y, RootLoc.Z + 50.f);
     const FVector End  (FootLoc.X, FootLoc.Y, RootLoc.Z - 50.f);
 
+    UWorld* World = GetWorld();
+    if (!World) return;
+
     FHitResult Hit;
     FCollisionQueryParams Params(NAME_None, false, GetOwningActor());
-    const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
+    const bool bFootHit = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
 
-    const FVector  FootTargetPos = bHit ? FVector(0.f, 0.f, Hit.ImpactPoint.Z - RootLoc.Z) : FVector::ZeroVector;
-    const float    Roll          = bHit ? FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.Y, Hit.Normal.Z)) : 0.f;
-    const float    Pitch         = bHit ? FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.X, Hit.Normal.Z)) * -1.f : 0.f;
-    const FRotator TargetRot     = bHit ? FRotator(Pitch, 0.f, Roll) : FRotator::ZeroRotator;
+    const FVector  FootTargetPos = bFootHit ? FVector(0.f, 0.f, Hit.ImpactPoint.Z - RootLoc.Z) : FVector::ZeroVector;
+    const float    Roll          = bFootHit ? FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.Y, Hit.Normal.Z)) : 0.f;
+    const float    Pitch         = bFootHit ? FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.X, Hit.Normal.Z)) * -1.f : 0.f;
+    const FRotator TargetRot     = bFootHit ? FRotator(Pitch, 0.f, Roll) : FRotator::ZeroRotator;
 
-    OutPos = FMath::VInterpTo(OutPos, FootTargetPos, DeltaSeconds, FootInterpSpeed);
-    OutRot = FMath::RInterpTo(OutRot, TargetRot, DeltaSeconds, FootInterpSpeed);
+    OutPos   = FMath::VInterpTo(OutPos, FootTargetPos, DeltaSeconds, FootInterpSpeed);
+    OutRot   = FMath::RInterpTo(OutRot, TargetRot,    DeltaSeconds, FootInterpSpeed);
+    OutAlpha = FMath::FInterpTo(OutAlpha, bFootHit ? 1.f : 0.f, DeltaSeconds, FootInterpSpeed);
 }

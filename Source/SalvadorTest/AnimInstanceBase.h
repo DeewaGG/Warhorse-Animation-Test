@@ -20,6 +20,9 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "State")
     bool bIsStunned = false;
 
+    UPROPERTY(BlueprintReadWrite, Category = "State")
+    bool bHit = false;
+
     // ── Foot IK goals (written by HitReactionComponent and ABP children) ─────
     UPROPERTY(BlueprintReadWrite, Category = "FootIK")
     FVector LeftFootIKPosition = FVector::ZeroVector;
@@ -34,15 +37,21 @@ public:
     FRotator RightFootRot = FRotator::ZeroRotator;
 
     UPROPERTY(BlueprintReadOnly, Category = "FootIK")
+    float LeftFootIKAlpha = 0.f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "FootIK")
+    float RightFootIKAlpha = 0.f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "FootIK")
     FVector LeftHandIKPosition = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly, Category = "FootIK")
+    UPROPERTY(BlueprintReadWrite, Category = "FootIK")
     FRotator LeftHandIKRotation = FRotator::ZeroRotator;
 
-    UPROPERTY(BlueprintReadOnly, Category = "FootIK")
+    UPROPERTY(BlueprintReadWrite, Category = "FootIK")
     FVector RightHandIKPosition = FVector::ZeroVector;
 
-    UPROPERTY(BlueprintReadOnly, Category = "FootIK")
+    UPROPERTY(BlueprintReadWrite, Category = "FootIK")
     FRotator RightHandIKRotation = FRotator::ZeroRotator;
 
     UPROPERTY(BlueprintReadWrite, Category = "FootIK")
@@ -59,6 +68,9 @@ public:
 
     UPROPERTY(BlueprintReadWrite, Category = "FootIK")
     FRotator PlantedSlaveRot = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|IK")
+    FVector HandHeightAdditiveOffset = FVector::ZeroVector;
 
 protected:
 
@@ -107,6 +119,12 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float TargetOriMinInfluence = 0.8f;
 
+    UPROPERTY(EditDefaultsOnly, Category = "Combat")
+    FName PelvisBone = TEXT("pelvis");
+
+    UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.0"))
+    float HandHeightMaxOffset = 50.f;
+
     // ── Foot IK ──────────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
     FName FootL;
@@ -141,7 +159,8 @@ private:
     void ShouldMove();
     void IsFalling();
     void BodyIK(float DeltaSeconds);
-    void TraceFootIK(FName FootBone, float DeltaSeconds, FVector& OutPos, FRotator& OutRot);
+    void TraceFootIK(FName FootBone, float DeltaSeconds, FVector& OutPos, FRotator& OutRot, float& OutAlpha);
     void SyncPlayableCharacterData();
     void ComputeTargetAlpha();
+    void ComputeHandHeightIK();
 };

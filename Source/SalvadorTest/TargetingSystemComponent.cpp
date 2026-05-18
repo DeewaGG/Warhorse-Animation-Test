@@ -39,12 +39,15 @@ void UTargetingSystemComponent::PerformTrace()
 	UCameraComponent* Camera = Owner->FindComponentByClass<UCameraComponent>();
 	if (!Camera) return;
 
+	UWorld* World = GetWorld();
+	if (!World) return;
+
 	FVector Start = Camera->GetComponentLocation();
 	FVector End = Start + (Camera->GetForwardVector() * TraceRange);
 
 	TArray<FHitResult> HitResults;
 	FCollisionShape Shape = FCollisionShape::MakeSphere(TraceRadius);
-	GetWorld()->SweepMultiByChannel(
+	World->SweepMultiByChannel(
 		HitResults, Start, End, FQuat::Identity, ECC_GameTraceChannel1, Shape);
 
 	UTargetComponent* BestTarget = nullptr;
