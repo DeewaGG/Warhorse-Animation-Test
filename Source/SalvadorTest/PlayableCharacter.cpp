@@ -1,5 +1,6 @@
 #include "PlayableCharacter.h"
 #include "AnimInstanceBase.h"
+#include "AttackData.h"
 #include "TargetingSystemComponent.h"
 #include "TargetComponent.h"
 #include "Camera/CameraComponent.h"
@@ -8,6 +9,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
+#include "Engine/DataTable.h"
 
 APlayableCharacter::APlayableCharacter()
 {
@@ -57,6 +59,8 @@ void APlayableCharacter::BeginPlay()
     }
 
     ABP = Cast<UAnimInstanceBase>(GetMesh()->GetAnimInstance());
+    if (ABP)
+        ABP->OnMontageEnded.AddDynamic(this, &APlayableCharacter::OnAttackMontageEnded);
 
     AnimVars_BeginPlay();
 }
@@ -145,19 +149,46 @@ void APlayableCharacter::OnAttackStarted(const FInputActionValue& Value)
         return;
     }
 
-    TargetPos = CurrentTarget->GetComponentLocation();
+    TargetPos    = CurrentTarget->GetComponentLocation();
+    HandIKOffset = FVector::ZeroVector;
+
+    if (AttackDataTable && AttackMontage)
+    {
+        const FName RowKey = AttackMontage->GetFName();
+        UE_LOG(LogTemp, Log, TEXT("AttackDT lookup — key: '%s'"), *RowKey.ToString());
+        if (const FAttackMontageData* Row = AttackDataTable->FindRow<FAttackMontageData>(RowKey, TEXT("OnAttackStarted")))
+        {
+            switch (CurrentTarget->TargetSlot)
+            {
+                case ETargetSlot::TopTarget: HandIKOffset = Row->TopTargetOffset; break;
+                case ETargetSlot::MidTarget: HandIKOffset = Row->MidTargetOffset; break;
+                case ETargetSlot::BotTarget: HandIKOffset = Row->BotTargetOffset; break;
+            }
+            UE_LOG(LogTemp, Log, TEXT("AttackDT — HandIKOffset: %s"), *HandIKOffset.ToString());
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AttackDT — DataTable: %s | Montage: %s"),
+            AttackDataTable ? TEXT("OK") : TEXT("NULL"),
+            AttackMontage   ? TEXT("OK") : TEXT("NULL"));
+    }
+
     TargetingSystem->OnAttackStart();
 
-    const float Duration = PlayAnimMontage(AttackMontage);
-    if (Duration > 0.f)
-        GetWorldTimerManager().SetTimer(AttackTimerHandle, this, &APlayableCharacter::FinishAttack, Duration, false);
-    else
+    if (PlayAnimMontage(AttackMontage) <= 0.f)
         FinishAttack();
 }
 
 void APlayableCharacter::FinishAttack()
 {
     TargetingSystem->OnAttackEnd();
+}
+
+void APlayableCharacter::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+    if (Montage == AttackMontage)
+        FinishAttack();
 }
 
 void APlayableCharacter::OnAimStarted(const FInputActionValue& Value)

@@ -92,6 +92,7 @@ void UAnimInstanceBase::SyncPlayableCharacterData()
     bTurningL    = OwningPlayableCharacter->Turning_L;
     CamForward   = OwningPlayableCharacter->Cam_Forward;
     TargetPos    = OwningPlayableCharacter->TargetPos;
+    HandIKOffset = OwningPlayableCharacter->HandIKOffset;
 }
 
 void UAnimInstanceBase::BodyIK(float DeltaSeconds)
@@ -121,17 +122,21 @@ void UAnimInstanceBase::BodyIK(float DeltaSeconds)
 void UAnimInstanceBase::ComputeHandHeightIK()
 {
     const float LerpAttack = GetCurveValue(TEXT("LerpAttack"));
-    if (LerpAttack <= 0.f || TargetPos.IsZero() || !OwnerMesh)
+    if (LerpAttack <= 0.f || TargetPos.IsZero())
     {
         HandHeightAdditiveOffset = FVector::ZeroVector;
         return;
     }
 
-    const float   PelvisWorldZ = OwnerMesh->GetBoneLocation(PelvisBone).Z;
-    const float   DeltaWorld   = TargetPos.Z - PelvisWorldZ;
-    const float   ClampedDelta = FMath::Clamp(DeltaWorld, -HandHeightMaxOffset, HandHeightMaxOffset);
-    const FVector DeltaCS      = OwnerMesh->GetComponentTransform().InverseTransformVector(FVector(0.f, 0.f, ClampedDelta));
-    HandHeightAdditiveOffset   = FVector(0.f, 0.f, DeltaCS.Z * LerpAttack);
+    APawn* Pawn = TryGetPawnOwner();
+    if (!Pawn)
+    {
+        HandHeightAdditiveOffset = FVector::ZeroVector;
+        return;
+    }
+
+    const float HeightDelta = TargetPos.Z - Pawn->GetActorLocation().Z;
+    HandHeightAdditiveOffset = (HandIKOffset + FVector(0.f, 0.f, HeightDelta)) * LerpAttack;
 }
 
 void UAnimInstanceBase::TraceFootIK(FName FootBone, float DeltaSeconds, FVector& OutPos, FRotator& OutRot, float& OutAlpha)

@@ -12,6 +12,7 @@ class UInputMappingContext;
 class UInputAction;
 class UAnimMontage;
 class UAnimInstanceBase;
+class UDataTable;
 
 UCLASS()
 class SALVADORTEST_API APlayableCharacter : public ACharacter
@@ -54,6 +55,9 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Combat")
     TObjectPtr<UAnimMontage> AttackMontage;
 
+    UPROPERTY(EditDefaultsOnly, Category = "Combat")
+    TObjectPtr<UDataTable> AttackDataTable;
+
     // ── ABP-facing variables ──────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "Animation")
     bool Turning_R = false;
@@ -70,9 +74,11 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "Combat")
     FVector TargetPos = FVector::ZeroVector;
 
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    FVector HandIKOffset = FVector::ZeroVector;
+
 private:
     UPROPERTY() TObjectPtr<UAnimInstanceBase> ABP;
-    FTimerHandle AttackTimerHandle;
 
     void OnMove(const FInputActionValue& Value);
     void OnMouseLook(const FInputActionValue& Value);
@@ -85,4 +91,7 @@ private:
     void CamForwardUpdate();
     void AnimVars_BeginPlay();
     void FinishAttack();
+
+    UFUNCTION()
+    void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 };

@@ -114,16 +114,13 @@ protected:
     FVector TargetPos = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    FVector HandIKOffset = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
     float TargetAlpha = 0.f;
 
     UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float TargetOriMinInfluence = 0.8f;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Combat")
-    FName PelvisBone = TEXT("pelvis");
-
-    UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.0"))
-    float HandHeightMaxOffset = 50.f;
 
     // ── Foot IK ──────────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
