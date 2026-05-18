@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
+#include "AttackData.h"
 #include "PlayableCharacter.generated.h"
 
 class USpringArmComponent;
@@ -12,7 +13,6 @@ class UInputMappingContext;
 class UInputAction;
 class UAnimMontage;
 class UAnimInstanceBase;
-class UDataTable;
 
 UCLASS()
 class SALVADORTEST_API APlayableCharacter : public ACharacter
@@ -75,7 +75,10 @@ public:
     FVector TargetPos = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadWrite, Category = "Combat")
-    FVector HandIKOffset = FVector::ZeroVector;
+    FTargetSlotIKData CurrentSlotData;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    FAttackGlobalLimits CurrentLimits;
 
 private:
     UPROPERTY() TObjectPtr<UAnimInstanceBase> ABP;

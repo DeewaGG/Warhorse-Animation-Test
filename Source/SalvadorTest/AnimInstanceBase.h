@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
+#include "AttackData.h"
 #include "FootIKNodes.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "AnimInstanceBase.generated.h"
@@ -70,7 +71,19 @@ public:
     FRotator PlantedSlaveRot = FRotator::ZeroRotator;
 
     UPROPERTY(BlueprintReadOnly, Category = "Combat|IK")
-    FVector HandHeightAdditiveOffset = FVector::ZeroVector;
+    FVector DomHandAdditivePos = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|IK")
+    FRotator DomHandAdditiveRot = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|IK")
+    FVector SlaveHandAdditivePos = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|IK")
+    FRotator SlaveHandAdditiveRot = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat|IK")
+    FVector PelvisAdditiveOffset = FVector::ZeroVector;
 
 protected:
 
@@ -114,10 +127,10 @@ protected:
     FVector TargetPos = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadOnly, Category = "Combat")
-    FVector HandIKOffset = FVector::ZeroVector;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Combat")
     float TargetAlpha = 0.f;
+
+    FTargetSlotIKData   SlotData;
+    FAttackGlobalLimits Limits;
 
     UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float TargetOriMinInfluence = 0.8f;

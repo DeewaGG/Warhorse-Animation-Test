@@ -9,7 +9,6 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
-#include "Engine/DataTable.h"
 
 APlayableCharacter::APlayableCharacter()
 {
@@ -149,29 +148,23 @@ void APlayableCharacter::OnAttackStarted(const FInputActionValue& Value)
         return;
     }
 
-    TargetPos    = CurrentTarget->GetComponentLocation();
-    HandIKOffset = FVector::ZeroVector;
+    TargetPos       = CurrentTarget->GetComponentLocation();
+    CurrentSlotData = FTargetSlotIKData{};
+    CurrentLimits   = FAttackGlobalLimits{};
 
     if (AttackDataTable && AttackMontage)
     {
         const FName RowKey = AttackMontage->GetFName();
-        UE_LOG(LogTemp, Log, TEXT("AttackDT lookup — key: '%s'"), *RowKey.ToString());
         if (const FAttackMontageData* Row = AttackDataTable->FindRow<FAttackMontageData>(RowKey, TEXT("OnAttackStarted")))
         {
             switch (CurrentTarget->TargetSlot)
             {
-                case ETargetSlot::TopTarget: HandIKOffset = Row->TopTargetOffset; break;
-                case ETargetSlot::MidTarget: HandIKOffset = Row->MidTargetOffset; break;
-                case ETargetSlot::BotTarget: HandIKOffset = Row->BotTargetOffset; break;
+                case ETargetSlot::TopTarget: CurrentSlotData = Row->TopTarget; break;
+                case ETargetSlot::MidTarget: CurrentSlotData = Row->MidTarget; break;
+                case ETargetSlot::BotTarget: CurrentSlotData = Row->BotTarget; break;
             }
-            UE_LOG(LogTemp, Log, TEXT("AttackDT — HandIKOffset: %s"), *HandIKOffset.ToString());
+            CurrentLimits = Row->GlobalLimits;
         }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AttackDT — DataTable: %s | Montage: %s"),
-            AttackDataTable ? TEXT("OK") : TEXT("NULL"),
-            AttackMontage   ? TEXT("OK") : TEXT("NULL"));
     }
 
     TargetingSystem->OnAttackStart();
