@@ -1,4 +1,5 @@
 #include "AnimInstanceBase.h"
+#include "PlayableCharacter.h"
 #include "GameFramework/Character.h"
 #include "KismetAnimationLibrary.h"
 #include "Engine/World.h"
@@ -13,12 +14,18 @@ void UAnimInstanceBase::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
 
-    if (!MovementComponent) return;
+    if (!MovementComponent)
+    {
+        GetMovComp();
+        if (!MovementComponent) return;
+    }
 
     VelocityAndSpeed();
     CalculateDirections();
     ShouldMove();
     IsFalling();
+    SyncPlayableCharacterData();
+    ComputeTargetAlpha();
     BodyIK(DeltaSeconds);
 }
 
@@ -30,8 +37,9 @@ void UAnimInstanceBase::GetMovComp()
         UE_LOG(LogTemp, Error, TEXT("AnimInstanceBase: owning actor is not a Character"));
         return;
     }
-    MovementComponent = Character->GetCharacterMovement();
-    OwnerMesh         = Character->GetMesh();
+    MovementComponent        = Character->GetCharacterMovement();
+    OwnerMesh                = Character->GetMesh();
+    OwningPlayableCharacter  = Cast<APlayableCharacter>(Character);
 }
 
 void UAnimInstanceBase::VelocityAndSpeed()
@@ -55,6 +63,37 @@ void UAnimInstanceBase::ShouldMove()
 void UAnimInstanceBase::IsFalling()
 {
     bIsFalling = MovementComponent->IsFalling();
+}
+
+void UAnimInstanceBase::ComputeTargetAlpha()
+{
+    if (GetCurveValue(TEXT("LerpAttack")) <= 0.f || TargetPos.IsZero())
+    {
+        TargetAlpha = 0.f;
+        return;
+    }
+
+    APawn* Pawn = TryGetPawnOwner();
+    if (!Pawn)
+    {
+        TargetAlpha = 0.f;
+        return;
+    }
+
+    const FVector ToTarget = (TargetPos - Pawn->GetActorLocation()).GetSafeNormal();
+    const float   Dot      = FVector::DotProduct(CamForward.GetSafeNormal(), ToTarget);
+
+    TargetAlpha = FMath::Clamp((Dot - TargetOriMinInfluence) / (1.f - TargetOriMinInfluence), 0.f, 1.f);
+}
+
+void UAnimInstanceBase::SyncPlayableCharacterData()
+{
+    if (!OwningPlayableCharacter) return;
+    TurningSpeed = (float)OwningPlayableCharacter->Turning_Speed;
+    bTurningR    = OwningPlayableCharacter->Turning_R;
+    bTurningL    = OwningPlayableCharacter->Turning_L;
+    CamForward   = OwningPlayableCharacter->Cam_Forward;
+    TargetPos    = OwningPlayableCharacter->TargetPos;
 }
 
 void UAnimInstanceBase::BodyIK(float DeltaSeconds)
@@ -93,11 +132,11 @@ void UAnimInstanceBase::TraceFootIK(FName FootBone, float DeltaSeconds, FVector&
     FCollisionQueryParams Params(NAME_None, false, GetOwningActor());
     const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
 
-    const FVector  TargetPos = bHit ? FVector(0.f, 0.f, Hit.ImpactPoint.Z - RootLoc.Z) : FVector::ZeroVector;
-    const float    Roll      = bHit ? FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.Y, Hit.Normal.Z)) : 0.f;
-    const float    Pitch     = bHit ? FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.X, Hit.Normal.Z)) * -1.f : 0.f;
-    const FRotator TargetRot = bHit ? FRotator(Pitch, 0.f, Roll) : FRotator::ZeroRotator;
+    const FVector  FootTargetPos = bHit ? FVector(0.f, 0.f, Hit.ImpactPoint.Z - RootLoc.Z) : FVector::ZeroVector;
+    const float    Roll          = bHit ? FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.Y, Hit.Normal.Z)) : 0.f;
+    const float    Pitch         = bHit ? FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.X, Hit.Normal.Z)) * -1.f : 0.f;
+    const FRotator TargetRot     = bHit ? FRotator(Pitch, 0.f, Roll) : FRotator::ZeroRotator;
 
-    OutPos = FMath::VInterpTo(OutPos, TargetPos, DeltaSeconds, FootInterpSpeed);
+    OutPos = FMath::VInterpTo(OutPos, FootTargetPos, DeltaSeconds, FootInterpSpeed);
     OutRot = FMath::RInterpTo(OutRot, TargetRot, DeltaSeconds, FootInterpSpeed);
 }

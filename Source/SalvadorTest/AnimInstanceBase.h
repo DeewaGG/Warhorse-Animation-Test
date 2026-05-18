@@ -6,6 +6,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "AnimInstanceBase.generated.h"
 
+class APlayableCharacter;
+
 UCLASS()
 class SALVADORTEST_API UAnimInstanceBase : public UAnimInstance
 {
@@ -35,10 +37,28 @@ public:
     FVector LeftHandIKPosition = FVector::ZeroVector;
 
     UPROPERTY(BlueprintReadOnly, Category = "FootIK")
+    FRotator LeftHandIKRotation = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadOnly, Category = "FootIK")
     FVector RightHandIKPosition = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "FootIK")
+    FRotator RightHandIKRotation = FRotator::ZeroRotator;
 
     UPROPERTY(BlueprintReadWrite, Category = "FootIK")
     FVector PelvisGoalPosition = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "FootIK")
+    FVector PlantedDomLoc = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "FootIK")
+    FRotator PlantedDomRot = FRotator::ZeroRotator;
+
+    UPROPERTY(BlueprintReadWrite, Category = "FootIK")
+    FVector PlantedSlaveLoc = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "FootIK")
+    FRotator PlantedSlaveRot = FRotator::ZeroRotator;
 
 protected:
 
@@ -64,6 +84,28 @@ protected:
 
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
     bool bIsFalling = false;
+
+    // ── PlayableCharacter data (read by ABP children) ─────────────────────────
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    float TurningSpeed = 0.f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bTurningR = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    bool bTurningL = false;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Movement")
+    FVector CamForward = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    FVector TargetPos = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Combat")
+    float TargetAlpha = 0.f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TargetOriMinInfluence = 0.8f;
 
     // ── Foot IK ──────────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
@@ -91,6 +133,8 @@ protected:
     float FootInterpSpeed = 10.f;
 
 private:
+    UPROPERTY() TObjectPtr<APlayableCharacter> OwningPlayableCharacter;
+
     void GetMovComp();
     void VelocityAndSpeed();
     void CalculateDirections();
@@ -98,4 +142,6 @@ private:
     void IsFalling();
     void BodyIK(float DeltaSeconds);
     void TraceFootIK(FName FootBone, float DeltaSeconds, FVector& OutPos, FRotator& OutRot);
+    void SyncPlayableCharacterData();
+    void ComputeTargetAlpha();
 };
