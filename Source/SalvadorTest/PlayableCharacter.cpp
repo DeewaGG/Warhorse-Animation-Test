@@ -179,6 +179,9 @@ void APlayableCharacter::OnAttackStarted(const FInputActionValue& Value)
 
     TargetingSystem->OnAttackStart();
 
+    if (HitImpactComp)
+        HitImpactComp->DisableNearbyVictimsPhysics();
+
     if (PlayAnimMontage(AttackMontage) <= 0.f)
         FinishAttack();
 }

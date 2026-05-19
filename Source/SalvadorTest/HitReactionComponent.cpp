@@ -117,16 +117,12 @@ void UHitReactionComponent::ActivateSimBones()
         Mesh->AddImpulse(HitDir * HitStrength / 5.0,   Bone, true);
     }
 
-    if (bLowHealthActive && NoPhysicsWoundedBone != NAME_None)
-    {
-        Mesh->SetAllBodiesBelowSimulatePhysics(NoPhysicsWoundedBone, false, true);
-        Mesh->SetAllBodiesBelowPhysicsBlendWeight(NoPhysicsWoundedBone, 0.f, false, true);
-    }
 }
 
 void UHitReactionComponent::SetupVarsForSim()
 {
-    bResetHit = true;
+    bBlendingOutPhysics = false;
+    bResetHit           = true;
 
     const FVector CapsuleLoc = BPVictim ? BPVictim->GetActorLocation() : FVector::ZeroVector;
     PushGoal = FVector2D(CapsuleLoc + HitDir * 200.0);
@@ -186,7 +182,7 @@ void UHitReactionComponent::OpenTickGate()
 
 void UHitReactionComponent::LowHealthTick(float DeltaTime)
 {
-    if (!bLowHealthActive || !Mesh) return;
+    if (!bLowHealthActive || !Mesh || bBlendingOutPhysics) return;
 
     LowHealthElapsed += DeltaTime;
 
@@ -331,6 +327,24 @@ void UHitReactionComponent::ReactiveSteps(float DeltaTime)
     bWasRStriding = RFootState.bStriding;
 }
 
+void UHitReactionComponent::BlendOutPhysics(float Duration)
+{
+    if (!bLowHealthActive || !Mesh) return;
+    bBlendingOutPhysics = true;
+    BlendOutDuration    = FMath::Max(Duration, 0.f);
+    BlendOutElapsed     = 0.f;
+    BlendOutStartWeight = LowHealthBlend;
+    SetComponentTickEnabled(true);
+}
+
+void UHitReactionComponent::StopLowHealthSim()
+{
+    if (!bLowHealthActive || !Mesh) return;
+    Mesh->SetAllBodiesBelowPhysicsBlendWeight(MidSimBone, 0.f, false, true);
+    Mesh->SetAllBodiesBelowSimulatePhysics(MidSimBone, false, true);
+    bLowHealthActive = false;
+}
+
 void UHitReactionComponent::SetDeathPlantBlend(float Blend)
 {
     if (!Mesh) return;
@@ -462,4 +476,20 @@ void UHitReactionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
     }
 
     LowHealthTick(DeltaTime);
+
+    if (bBlendingOutPhysics && Mesh)
+    {
+        BlendOutElapsed += DeltaTime;
+        const float T = (BlendOutDuration > 0.f)
+            ? FMath::Clamp(BlendOutElapsed / BlendOutDuration, 0.f, 1.f) : 1.f;
+        Mesh->SetAllBodiesBelowPhysicsBlendWeight(MidSimBone, FMath::Lerp(BlendOutStartWeight, 0.f, T), false, true);
+        if (T >= 1.f)
+        {
+            Mesh->SetAllBodiesBelowSimulatePhysics(MidSimBone, false, true);
+            bLowHealthActive    = false;
+            bBlendingOutPhysics = false;
+            if (!bIsRagdoll)
+                SetComponentTickEnabled(false);
+        }
+    }
 }

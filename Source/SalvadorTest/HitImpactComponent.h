@@ -20,6 +20,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "HitImpact")
     void HitImpact(AActor* HitActor, FVector HitLocation, FName HitBone, UAnimMontage* Montage);
 
+    // Call at attack start. Blends out physics on all nearby wounded victims so weapon
+    // traces can hit them during the swing.
+    UFUNCTION(BlueprintCallable, Category = "HitImpact")
+    void DisableNearbyVictimsPhysics();
+
+
     UFUNCTION(BlueprintCallable, Category = "HitImpact")
     void PhysicRecovery(FName BoneName, FVector ImpulseDirection, float ImpulseMagnitude);
 
@@ -78,8 +84,7 @@ public:
               meta = (ClampMin = "0.0"))
     float HipRecoverDuration = 0.3f;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Timing",
-              meta = (ClampMin = "0.0"))
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Timing")
     float ReverseStartOffset = 0.0f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Timing",
@@ -90,12 +95,11 @@ public:
     bool bForceFixedReverseFrame = false;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Timing",
-              meta = (ClampMin = "0.0", EditCondition = "bForceFixedReverseFrame"))
+              meta = (EditCondition = "bForceFixedReverseFrame"))
     float FixedReversePosition = 0.0f;
 
     // ── Early-exit reverse overrides (blacklist, distance, any incomplete hit) ─
-    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Exit",
-              meta = (ClampMin = "0.0"))
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Exit")
     float ExitReverseStartOffset = 0.0f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Exit",
@@ -106,8 +110,17 @@ public:
     bool bExitForceFixedReverseFrame = true;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Exit",
-              meta = (ClampMin = "0.0", EditCondition = "bExitForceFixedReverseFrame"))
+              meta = (EditCondition = "bExitForceFixedReverseFrame"))
     float ExitFixedReversePosition = 0.08f;
+
+    // ── Nearby physics disable ────────────────────────────────────────────────
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|WoundedHit",
+              meta = (ClampMin = "0.0"))
+    float NearbyPhysicsDisableRadius = 300.f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|WoundedHit",
+              meta = (ClampMin = "0.0"))
+    float NearbyPhysicsBlendOutDuration = 0.3f;
 
     // ── Reach ─────────────────────────────────────────────────────────────────
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Reach",
@@ -152,6 +165,7 @@ private:
     bool         bThrustActive = false;
     bool         bThrust       = false;
     bool         bRecover      = false;
+
 
     float SpineCurrentAlpha   = 0.f;
     float SpineTargetAlpha    = 0.f;

@@ -31,6 +31,13 @@ public:
     UFUNCTION(BlueprintCallable, Category = "HitReaction")
     void SetDeathPlantBlend(float Blend);
 
+    UFUNCTION(BlueprintCallable, Category = "HitReaction")
+    void StopLowHealthSim();
+
+    void BlendOutPhysics(float Duration);
+
+    bool IsLowHealthActive() const { return bLowHealthActive; }
+
     // ── Ragdoll transition ────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Ragdoll",
               meta = (ClampMin = "0.0"))
@@ -170,9 +177,6 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
     FName RootSimBone = TEXT("root");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
-    FName NoPhysicsWoundedBone = TEXT("head");
-
     // ── Physical animation ────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Physics")
     FName PhysicalAnimProfile = TEXT("HitReaction");
@@ -217,6 +221,12 @@ private:
     bool  bLowHealthActive = false;
     float LowHealthElapsed = 0.f;
     float LowHealthBlend   = 0.f;
+
+    // ── Physics blend-out state ───────────────────────────────────────────────
+    bool  bBlendingOutPhysics = false;
+    float BlendOutDuration    = 0.f;
+    float BlendOutElapsed     = 0.f;
+    float BlendOutStartWeight = 0.f;
 
     // ── Ragdoll state ─────────────────────────────────────────────────────────
     bool  bIsRagdoll     = false;

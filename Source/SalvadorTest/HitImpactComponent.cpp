@@ -6,6 +6,7 @@
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "GameFramework/Character.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Kismet/KismetSystemLibrary.h"
 
 UHitImpactComponent::UHitImpactComponent()
 {
@@ -64,8 +65,8 @@ void UHitImpactComponent::TickComponent(float DeltaTime, ELevelTick TickType,
             {
                 State.MontageRate = CapturedMontageRate * ExitReverseRateMultiplier;
                 State.MontagePos  = bExitForceFixedReverseFrame
-                    ? FMath::Max(0.f, ExitFixedReversePosition)
-                    : FMath::Max(0.f, CapturedMontageRawPos - ExitReverseStartOffset);
+                    ? ExitFixedReversePosition
+                    : CapturedMontageRawPos - ExitReverseStartOffset;
             }
             if (bRecover && VictimActor)
             {
@@ -93,12 +94,32 @@ void UHitImpactComponent::TickComponent(float DeltaTime, ELevelTick TickType,
     }
 }
 
+void UHitImpactComponent::DisableNearbyVictimsPhysics()
+{
+    if (!OwnerCharacter) return;
+
+    TArray<AActor*> OverlappedActors;
+    TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes = { UEngineTypes::ConvertToObjectType(ECC_Pawn) };
+    TArray<AActor*> Ignored = { OwnerCharacter };
+
+    UKismetSystemLibrary::SphereOverlapActors(
+        this, OwnerCharacter->GetActorLocation(),
+        NearbyPhysicsDisableRadius, ObjectTypes,
+        nullptr, Ignored, OverlappedActors);
+
+    for (AActor* Actor : OverlappedActors)
+    {
+        if (UHitReactionComponent* HRC = Actor->FindComponentByClass<UHitReactionComponent>())
+            HRC->BlendOutPhysics(NearbyPhysicsBlendOutDuration);
+    }
+}
+
 void UHitImpactComponent::HitImpact(AActor* HitActor, FVector HitLocation,
                                      FName HitBone, UAnimMontage* Montage)
 {
     if (!AnimInstance || !Montage) return;
 
-    VictimActor   = HitActor;
+    VictimActor = HitActor;
     SetComponentTickEnabled(true);
     bThrustActive = true;
     bThrust       = false;
@@ -114,8 +135,8 @@ void UHitImpactComponent::HitImpact(AActor* HitActor, FVector HitLocation,
 
     const float MontageRate = CapturedMontageRate * ReverseRateMultiplier;
     const float MontagePos  = bForceFixedReverseFrame
-        ? FMath::Max(0.f, FixedReversePosition)
-        : FMath::Max(0.f, CapturedMontageRawPos - ReverseStartOffset);
+        ? FixedReversePosition
+        : CapturedMontageRawPos - ReverseStartOffset;
     AnimInstance->Montage_SetPlayRate(Montage, 0.f);
 
     // Apply the DataTable per-slot position offset to the hit location.
