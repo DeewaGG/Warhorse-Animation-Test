@@ -101,7 +101,8 @@ void UHitImpactComponent::HitImpact(AActor* HitActor, FVector HitLocation,
     AnimInstance->SetSpineLookAtTarget(HitActor ? HitActor->GetActorLocation() : HitLocation);
     SpineTargetAlpha = 0.f; // ThrustPlant drives SpineLookAtAlpha directly; component only fades post-ThrustEnd
 
-    const float MontagePos = FMath::Max(0.f, AnimInstance->Montage_GetPosition(Montage) - ReverseStartOffset);
+    const float MontageRate = AnimInstance->Montage_GetPlayRate(Montage) * ReverseRateMultiplier;
+    const float MontagePos  = FMath::Max(0.f, AnimInstance->Montage_GetPosition(Montage) - ReverseStartOffset);
     AnimInstance->Montage_SetPlayRate(Montage, 0.f);
 
     UThrustSystemNodes::ThrustSetUp(
@@ -109,7 +110,7 @@ void UHitImpactComponent::HitImpact(AActor* HitActor, FVector HitLocation,
         DomLocGoal, DomRotGoal, SlaveLocGoal, SlaveRotGoal,
         ContactSockets, SkipPlantBones,
         HitLocation, HitBone,
-        HitReachDelay, PlantDuration, Montage, MontagePos,
+        HitReachDelay, PlantDuration, Montage, MontagePos, MontageRate,
         RecoverDuration, LimitBone, MaxDistFromBone,
         StabDepth, ArmReachPercent,
         HipLocGoal, HipFollowPercent,

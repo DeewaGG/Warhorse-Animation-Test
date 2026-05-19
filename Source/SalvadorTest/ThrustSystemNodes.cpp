@@ -78,6 +78,7 @@ void UThrustSystemNodes::ThrustSetUp(
     float PlantDuration,
     UAnimMontage* Montage,
     float MontageCurrentPos,
+    float MontagePlayRate,
     float RecoverDuration,
     FName LimitBone,
     float MaxDistFromBone,
@@ -110,7 +111,7 @@ void UThrustSystemNodes::ThrustSetUp(
         : nullptr;
 
     const FVector RawTargetWorld = (VictimMesh && TargetBoneName != NAME_None)
-        ? VictimMesh->GetBoneLocation(TargetBoneName)
+        ? VictimMesh->GetSocketLocation(TargetBoneName)
         : HitLocation;
 
     FName   ClosestSocket      = ContactSockets[0];
@@ -198,6 +199,7 @@ void UThrustSystemNodes::ThrustSetUp(
     State.PlantElapsed     = 0.f;
     State.Montage          = Montage;
     State.MontagePos       = FMath::Max(0.f, MontageCurrentPos);
+    State.MontageRate      = FMath::Abs(MontagePlayRate) > KINDA_SMALL_NUMBER ? MontagePlayRate : 1.f;
     State.RecoverDuration  = RecoverDuration;
     State.TotalFrames      = 0;
     State.FramesRemaining  = 0;
@@ -257,7 +259,7 @@ void UThrustSystemNodes::ThrustTick(
         ? State.VictimActor->FindComponentByClass<USkeletalMeshComponent>()
         : nullptr;
     const FVector LiveTargetWorld = (VictimMesh && State.TargetBone != NAME_None)
-        ? VictimMesh->GetBoneLocation(State.TargetBone) + State.TargetBoneOffset
+        ? VictimMesh->GetSocketLocation(State.TargetBone) + State.TargetBoneOffset
         : State.TargetBoneWorld;
 
     // Socket feedback scaled by Alpha: same convergence logic as ThrustPlant but ramped 0→1.
@@ -318,7 +320,7 @@ void UThrustSystemNodes::ThrustPlant(
     if (State.FramesRemaining == 0)
     {
         State.PlantedTargetBoneWorld = (VictimMesh && State.TargetBone != NAME_None)
-            ? VictimMesh->GetBoneLocation(State.TargetBone) + State.TargetBoneOffset
+            ? VictimMesh->GetSocketLocation(State.TargetBone) + State.TargetBoneOffset
             : State.TargetBoneWorld;
 
         // World-anchored hand rotation: stable under camera/character yaw (must be computed first)
@@ -334,7 +336,7 @@ void UThrustSystemNodes::ThrustPlant(
     }
 
     const FVector CurrentTargetWorld = (VictimMesh && State.TargetBone != NAME_None)
-        ? VictimMesh->GetBoneLocation(State.TargetBone) + State.TargetBoneOffset
+        ? VictimMesh->GetSocketLocation(State.TargetBone) + State.TargetBoneOffset
         : State.TargetBoneWorld;
 
     // Socket-feedback: read the actual socket position from the mesh (reflects last frame's IK),
@@ -412,11 +414,13 @@ void UThrustSystemNodes::ThrustRecover(
 
             if (StartPos > KINDA_SMALL_NUMBER)
             {
+                const float ReverseRate  = -FMath::Abs(State.MontageRate);
+                const float RealDuration = StartPos / FMath::Abs(ReverseRate);
                 State.MontagePos         = StartPos;
                 State.bMontageReversing  = true;
-                State.ArmRecoverDuration = FMath::Min(State.ArmRecoverDuration, StartPos);
-                State.HipRecoverDuration = FMath::Min(State.HipRecoverDuration, StartPos);
-                AnimInst->Montage_Play(State.Montage, -1.f,
+                State.ArmRecoverDuration = FMath::Min(State.ArmRecoverDuration, RealDuration);
+                State.HipRecoverDuration = FMath::Min(State.HipRecoverDuration, RealDuration);
+                AnimInst->Montage_Play(State.Montage, ReverseRate,
                     EMontagePlayReturnType::MontageLength, StartPos, true);
             }
         }

@@ -80,6 +80,10 @@ public:
               meta = (ClampMin = "0.0"))
     float ReverseStartOffset = 0.0f;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Timing",
+              meta = (ClampMin = "0.01"))
+    float ReverseRateMultiplier = 1.0f;
+
     // ── Reach ─────────────────────────────────────────────────────────────────
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Reach",
               meta = (ClampMin = "0.0"))

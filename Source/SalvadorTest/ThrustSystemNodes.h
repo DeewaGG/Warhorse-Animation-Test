@@ -152,6 +152,9 @@ struct FThrustState
     float MontagePos = 0.f;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
+    float MontageRate = 1.f;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Recover")
     float RecoverDuration = 0.1f;
 
 
@@ -242,6 +245,7 @@ public:
         float PlantDuration,
         UAnimMontage* Montage,
         float MontageCurrentPos,
+        float MontagePlayRate,
         float RecoverDuration,
         FName LimitBone,
         float MaxDistFromBone,

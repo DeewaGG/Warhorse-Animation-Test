@@ -50,6 +50,9 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "HitReaction|Health")
     int32 CurrentHP = 3;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Health")
+    TArray<FName> BlacklistedHitBones;
+
     // ── Stunt timing ─────────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Stunt")
     double StuntTime = 1.0;

@@ -63,7 +63,8 @@ void UHitReactionComponent::SetupComponent()
 
 void UHitReactionComponent::HitW_Physics(int32 InAttackSide, FName InBoneHit, FVector InHitDir, double InHitStrength)
 {
-    CurrentHP = FMath::Max(0, CurrentHP - 1);
+    if (!BlacklistedHitBones.Contains(InBoneHit))
+        CurrentHP = FMath::Max(0, CurrentHP - 1);
 
     AttackSide = InAttackSide;
     ProtectHit(InHitDir, InHitStrength);
@@ -75,12 +76,7 @@ void UHitReactionComponent::HitW_Physics(int32 InAttackSide, FName InBoneHit, FV
     {
         case 0:  PhysicsBones = { UpperSimBone, HitBone };                                       break;
         case 1:  PhysicsBones = { MidSimBone, HitBone };                                         break;
-        case 2:
-        {
-            const bool bRightSide = HitBone.ToString().EndsWith(TEXT("_r"));
-            PhysicsBones = { bRightSide ? LowerSimBoneR : LowerSimBoneL, HitBone };
-            break;
-        }
+        case 2:  PhysicsBones = { MidSimBone, HitBone };                                         break;
         default: PhysicsBones = { MidSimBone, HitBone };                                         break;
     }
 
@@ -211,8 +207,9 @@ bool UHitReactionComponent::CurveTickValues(float DeltaTime)
 void UHitReactionComponent::SimulationWeight()
 {
     if (!Mesh) return;
+    const float MaxWeight = (AttackSide == 2) ? 0.5f : 1.f;
     for (const FName& Bone : PhysicsBones)
-        Mesh->SetAllBodiesBelowPhysicsBlendWeight(Bone, (float)SimValue, false, true);
+        Mesh->SetAllBodiesBelowPhysicsBlendWeight(Bone, (float)SimValue * MaxWeight, false, true);
 }
 
 void UHitReactionComponent::PushVictim()
