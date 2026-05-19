@@ -155,6 +155,9 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float TargetOriMinInfluence = 0.8f;
 
+    UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "1.0"))
+    float PelvisInterpSpeed = 10.f;
+
     UPROPERTY(EditDefaultsOnly, Category = "Combat|SpineLook")
     FName PelvisBone = TEXT("pelvis");
 
@@ -198,5 +201,5 @@ private:
     void SyncPlayableCharacterData();
     void ComputeTargetAlpha();
     void ComputeSpineLookAt();
-    void ComputeHandHeightIK();
+    void ComputeHandHeightIK(float DeltaSeconds);
 };

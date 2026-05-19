@@ -28,6 +28,9 @@ struct FTargetSlotIKData
     FHandIKSlotData SlaveHand;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
+    FName PhysicsBone = NAME_None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics")
     float ImpulseMagnitude = 0.f;
 };
 

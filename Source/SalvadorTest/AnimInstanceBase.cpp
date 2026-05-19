@@ -27,7 +27,7 @@ void UAnimInstanceBase::NativeUpdateAnimation(float DeltaSeconds)
     SyncPlayableCharacterData();
     ComputeTargetAlpha();
     ComputeSpineLookAt();
-    ComputeHandHeightIK();
+    ComputeHandHeightIK(DeltaSeconds);
     BodyIK(DeltaSeconds);
 }
 
@@ -148,51 +148,57 @@ void UAnimInstanceBase::ComputeSpineLookAt()
     SpineLookAtAdditiveRot   = FRotator(ClampedPitch, ClampedYaw, 0.f) * SpineLookAtAlpha;
 }
 
-void UAnimInstanceBase::ComputeHandHeightIK()
+void UAnimInstanceBase::ComputeHandHeightIK(float DeltaSeconds)
 {
     const float LerpAttack = GetCurveValue(TEXT("LerpAttack"));
+
+    FVector TargetPelvisOffset = FVector::ZeroVector;
+
     if (LerpAttack <= 0.f || TargetPos.IsZero())
     {
         DomHandAdditivePos   = FVector::ZeroVector;
         DomHandAdditiveRot   = FRotator::ZeroRotator;
         SlaveHandAdditivePos = FVector::ZeroVector;
         SlaveHandAdditiveRot = FRotator::ZeroRotator;
-        PelvisAdditiveOffset = FVector::ZeroVector;
-        return;
+    }
+    else
+    {
+        APawn* Pawn = TryGetPawnOwner();
+        if (!Pawn)
+        {
+            DomHandAdditivePos   = FVector::ZeroVector;
+            DomHandAdditiveRot   = FRotator::ZeroRotator;
+            SlaveHandAdditivePos = FVector::ZeroVector;
+            SlaveHandAdditiveRot = FRotator::ZeroRotator;
+        }
+        else
+        {
+            const float HeightDelta = TargetPos.Z - Pawn->GetActorLocation().Z;
+
+            const float DomZ    = FMath::Clamp(HeightDelta, Limits.DomHand.HeightLimit.X,   Limits.DomHand.HeightLimit.Y);
+            const float SlaveZ  = FMath::Clamp(HeightDelta, Limits.SlaveHand.HeightLimit.X, Limits.SlaveHand.HeightLimit.Y);
+            const float PelvisZ = FMath::Clamp(
+                (DomZ + SlaveZ) * 0.5f * Limits.PelvisInfluence,
+                Limits.HipHeightLimit.X, Limits.HipHeightLimit.Y);
+
+            auto ClampRot = [](const FRotator& R, const FRotator& Min, const FRotator& Max) -> FRotator
+            {
+                return FRotator(
+                    FMath::Clamp(R.Pitch, Min.Pitch, Max.Pitch),
+                    FMath::Clamp(R.Yaw,   Min.Yaw,   Max.Yaw),
+                    FMath::Clamp(R.Roll,  Min.Roll,  Max.Roll));
+            };
+
+            DomHandAdditivePos   = (SlotData.DomHand.PositionOffset   + FVector(0.f, 0.f, DomZ))   * LerpAttack;
+            DomHandAdditiveRot   = ClampRot(SlotData.DomHand.RotationOffset,   Limits.DomHand.RotMin,   Limits.DomHand.RotMax)   * LerpAttack;
+            SlaveHandAdditivePos = (SlotData.SlaveHand.PositionOffset + FVector(0.f, 0.f, SlaveZ)) * LerpAttack;
+            SlaveHandAdditiveRot = ClampRot(SlotData.SlaveHand.RotationOffset, Limits.SlaveHand.RotMin, Limits.SlaveHand.RotMax) * LerpAttack;
+            TargetPelvisOffset   = FVector(0.f, 0.f, PelvisZ)                                                                    * LerpAttack;
+        }
     }
 
-    APawn* Pawn = TryGetPawnOwner();
-    if (!Pawn)
-    {
-        DomHandAdditivePos   = FVector::ZeroVector;
-        DomHandAdditiveRot   = FRotator::ZeroRotator;
-        SlaveHandAdditivePos = FVector::ZeroVector;
-        SlaveHandAdditiveRot = FRotator::ZeroRotator;
-        PelvisAdditiveOffset = FVector::ZeroVector;
-        return;
-    }
-
-    const float HeightDelta = TargetPos.Z - Pawn->GetActorLocation().Z;
-
-    const float DomZ   = FMath::Clamp(HeightDelta, Limits.DomHand.HeightLimit.X,   Limits.DomHand.HeightLimit.Y);
-    const float SlaveZ = FMath::Clamp(HeightDelta, Limits.SlaveHand.HeightLimit.X, Limits.SlaveHand.HeightLimit.Y);
-    const float PelvisZ = FMath::Clamp(
-        (DomZ + SlaveZ) * 0.5f * Limits.PelvisInfluence,
-        Limits.HipHeightLimit.X, Limits.HipHeightLimit.Y);
-
-    auto ClampRot = [](const FRotator& R, const FRotator& Min, const FRotator& Max) -> FRotator
-    {
-        return FRotator(
-            FMath::Clamp(R.Pitch, Min.Pitch, Max.Pitch),
-            FMath::Clamp(R.Yaw,   Min.Yaw,   Max.Yaw),
-            FMath::Clamp(R.Roll,  Min.Roll,  Max.Roll));
-    };
-
-    DomHandAdditivePos   = (SlotData.DomHand.PositionOffset   + FVector(0.f, 0.f, DomZ))   * LerpAttack;
-    DomHandAdditiveRot   = ClampRot(SlotData.DomHand.RotationOffset,   Limits.DomHand.RotMin,   Limits.DomHand.RotMax)   * LerpAttack;
-    SlaveHandAdditivePos = (SlotData.SlaveHand.PositionOffset + FVector(0.f, 0.f, SlaveZ)) * LerpAttack;
-    SlaveHandAdditiveRot = ClampRot(SlotData.SlaveHand.RotationOffset, Limits.SlaveHand.RotMin, Limits.SlaveHand.RotMax) * LerpAttack;
-    PelvisAdditiveOffset = FVector(0.f, 0.f, PelvisZ)                                                                    * LerpAttack;
+    // Interpolate pelvis separately to avoid single-frame snap on attack start/end
+    PelvisAdditiveOffset = FMath::VInterpTo(PelvisAdditiveOffset, TargetPelvisOffset, DeltaSeconds, PelvisInterpSpeed);
 }
 
 void UAnimInstanceBase::TraceFootIK(FName FootBone, float DeltaSeconds, FVector& OutPos, FRotator& OutRot, float& OutAlpha)

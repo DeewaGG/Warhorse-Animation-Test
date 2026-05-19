@@ -72,10 +72,15 @@ void UHitReactionComponent::HitW_Physics(int32 InAttackSide, FName InBoneHit, FV
     PhysicsBones.Reset();
     switch (AttackSide)
     {
-        case 0:  PhysicsBones = { UpperSimBone, HitBone };                    break;
-        case 1:  PhysicsBones = { MidSimBone, HitBone };                      break;
-        case 2:  PhysicsBones = { LowerSimBoneL, LowerSimBoneR, HitBone };    break;
-        default: PhysicsBones = { MidSimBone, HitBone };                      break;
+        case 0:  PhysicsBones = { UpperSimBone, HitBone };                                                               break;
+        case 1:  PhysicsBones = { MidSimBone, HitBone };                                                                 break;
+        case 2:
+        {
+            const bool bRightSide = HitBone.ToString().EndsWith(TEXT("_r"));
+            PhysicsBones = { bRightSide ? LowerSimBoneR : LowerSimBoneL, HitBone };
+            break;
+        }
+        default: PhysicsBones = { MidSimBone, HitBone };                                                                 break;
     }
 
     ProtectHit(InHitDir, InHitStrength);
@@ -100,8 +105,11 @@ void UHitReactionComponent::ActivateSimBones()
 
     for (const FName& Bone : PhysicsBones)
     {
-        Mesh->SetAllBodiesBelowSimulatePhysics(Bone, true, true);
+        // Profile must be applied before enabling simulation so motor constraints exist on the first physics tick
         PhysicAnimComp->ApplyPhysicalAnimationProfileBelow(Bone, PhysicalAnimProfile, true, true);
+        Mesh->SetAllBodiesBelowSimulatePhysics(Bone, true, true);
+        // Start at weight 0 so SimulationWeight() ramps up via the curve — prevents one-frame physics drop
+        Mesh->SetAllBodiesBelowPhysicsBlendWeight(Bone, 0.f, false, true);
     }
 
     for (const FName& Bone : PhysicsBones)

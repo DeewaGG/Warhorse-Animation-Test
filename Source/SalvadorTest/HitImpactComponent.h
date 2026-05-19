@@ -21,7 +21,7 @@ public:
     void HitImpact(AActor* HitActor, FVector HitLocation, FName HitBone, UAnimMontage* Montage);
 
     UFUNCTION(BlueprintCallable, Category = "HitImpact")
-    void PhysicRecovery(FVector Impulse);
+    void PhysicRecovery(FName BoneName, FVector ImpulseDirection, float ImpulseMagnitude);
 
 protected:
     virtual void BeginPlay() override;

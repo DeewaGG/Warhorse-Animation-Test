@@ -108,9 +108,9 @@ void UHitImpactComponent::HitImpact(AActor* HitActor, FVector HitLocation,
     AnimInstance->bHit = true;
 }
 
-void UHitImpactComponent::PhysicRecovery(FVector Impulse)
+void UHitImpactComponent::PhysicRecovery(FName BoneName, FVector ImpulseDirection, float ImpulseMagnitude)
 {
-    if (!OwnerCharacter) return;
+    if (!OwnerCharacter || BoneName == NAME_None) return;
     USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
     if (!Mesh) return;
 
@@ -119,11 +119,9 @@ void UHitImpactComponent::PhysicRecovery(FVector Impulse)
     PhysAnim->RegisterComponent();
     PhysAnim->SetSkeletalMeshComponent(Mesh);
 
-    Mesh->SetAllBodiesBelowSimulatePhysics(TEXT("upperarm_r"), true, true);
-    PhysAnim->ApplyPhysicalAnimationProfileBelow(TEXT("upperarm_r"), TEXT("HitReaction"), true, true);
+    Mesh->SetAllBodiesBelowSimulatePhysics(BoneName, true, true);
+    PhysAnim->ApplyPhysicalAnimationProfileBelow(BoneName, TEXT("HitReaction"), true, true);
 
-    Mesh->SetAllBodiesBelowSimulatePhysics(TEXT("upperarm_l"), true, true);
-    PhysAnim->ApplyPhysicalAnimationProfileBelow(TEXT("upperarm_l"), TEXT("HitReaction"), true, true);
-
-    Mesh->AddImpulse(Impulse, TEXT("upperarm_r"), true);
+    if (ImpulseMagnitude > 0.f)
+        Mesh->AddImpulse(ImpulseDirection.GetSafeNormal() * ImpulseMagnitude, BoneName, true);
 }
