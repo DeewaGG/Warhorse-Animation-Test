@@ -11,13 +11,27 @@
 
 class UAnimInstanceBase;
 
+USTRUCT(BlueprintType)
+struct FBlacklistedBoneSettings
+{
+    GENERATED_BODY()
+
+    /** Physics simulation blend weight scale. 1 = full wobble (default), 0 = body stays completely still. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float SimScale = 1.f;
+
+    /** Multiplier on VictimPushForce for this bone. 1 = full push, 0 = no movement. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0"))
+    float PushForceScale = 1.f;
+};
+
 // Drives physical hit reactions, foot repositioning, low-health simulation, and ragdoll death.
 //
 // State machine (tick disabled between states):
 //   Idle
 //     → HitW_Physics()     — stunt running: curve drives SimValue, SimulationWeight/PushVictim/PelvisMovement each frame
 //          → bFinished      — SimFinish() stops stunt physics; ReactiveSteps repositions feet
-//          → AreFeetRepositioned() — if HP==1: LowHealthTick activates (persistent mid-bone oscillation)
+//          → AreFeetRepositioned() — if HP==1: WoundedTick activates (persistent mid-bone oscillation)
 //     → ActivateRagdoll()  — full ragdoll blend-in over RagdollTransitionTime
 //          → T >= 1         — if RagdollLifetime > 0: freeze bodies in place, kill all ticks and collisions
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
@@ -48,13 +62,13 @@ public:
 
     // Instantly disables MidSimBone simulation. Use BlendOutPhysics() for a gradual transition.
     UFUNCTION(BlueprintCallable, Category = "HitReaction")
-    void StopLowHealthSim();
+    void StopWoundedSim();
 
     // Ramps the low-health physics blend to zero over Duration seconds. No-op if low-health is not active.
     void BlendOutPhysics(float Duration);
 
     // Queried by BP to gate death triggers — ensures ActivateRagdoll doesn't fire before low-health starts.
-    bool IsLowHealthActive() const { return bLowHealthActive; }
+    bool IsWoundedActive() const { return bWoundedActive; }
 
     // ── Ragdoll transition ────────────────────────────────────────────────────
 
@@ -87,46 +101,60 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "HitReaction|Health")
     int32 CurrentHP = 3;
 
-    /** Hits to bones in this list skip HP decrement but still run the full stunt and ThrustRecover. */
+    /** Bones that skip HP decrement but still run the full stunt and ThrustRecover. Per-bone settings control simulation influence and push force independently. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Health")
-    TArray<FName> BlacklistedHitBones;
+    TMap<FName, FBlacklistedBoneSettings> BlacklistedHitBones;
+
+    /** Multiplier applied to HitStrength when the hit bone is blacklisted. 0 = no impulse, 1 = full impulse. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Health",
+              meta = (ClampMin = "0.0"))
+    float BlacklistedImpulseScale = 1.f;
 
     // ── Low health simulation ─────────────────────────────────────────────────
 
     /** Target physics blend weight for MidSimBone during low-health simulation. Lower = subtle fatigue look; higher = near-ragdoll. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Wounded",
               meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float LowHealthSimWeight = 0.3f;
+    float WoundedSimWeight = 0.3f;
 
-    /** Time in seconds to blend from 0 to LowHealthSimWeight when low-health activates. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+    /** Time in seconds to blend from 0 to WoundedSimWeight when low-health activates. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Wounded",
               meta = (ClampMin = "0.0"))
-    float LowHealthTransitionTime = 1.5f;
+    float WoundedTransitionTime = 1.5f;
 
-    /** Safety timeout in seconds: stops low-health simulation if the character is never killed. 0 = no timeout. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+    /** Safety timeout in seconds: starts blending out low-health simulation if the character is never killed. 0 = no timeout. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Wounded",
               meta = (ClampMin = "0.0"))
-    float LowHealthTickTimeout = 5.f;
+    float WoundedTickTimeout = 0.f;
+
+    /** Duration in seconds of the blend-out when WoundedTickTimeout fires. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Wounded",
+              meta = (ClampMin = "0.0"))
+    float WoundedTimeoutBlendOutDuration = 1.f;
 
     /** Frequency (Hz) of the primary oscillation wave. Low values (~0.3) produce a slow, laboured breathing feel. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Wounded",
               meta = (ClampMin = "0.0"))
-    float LowHealthOscFrequency = 0.35f;
+    float WoundedOscFrequency = 0.35f;
 
-    /** Amplitude of the primary wave in blend weight units, added on top of LowHealthSimWeight each frame. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+    /** Amplitude of the primary wave in blend weight units, added on top of WoundedSimWeight each frame. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Wounded",
               meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float LowHealthOscAmplitude = 0.2f;
+    float WoundedOscAmplitude = 0.2f;
 
     /** Frequency (Hz) of the secondary oscillation wave. Higher values (~0.8) add an involuntary muscle-tremor layer. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Wounded",
               meta = (ClampMin = "0.0"))
-    float LowHealthOscFrequency2 = 0.8f;
+    float WoundedOscFrequency2 = 0.8f;
 
     /** Amplitude of the secondary (tremor) wave in blend weight units. Keep lower than the primary amplitude. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Wounded",
               meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float LowHealthOscAmplitude2 = 0.08f;
+    float WoundedOscAmplitude2 = 0.08f;
+
+    /** Root bone (inclusive) of the simulation chain during the wounded state. All bones below this receive physics. Defaults to MidSimBone value if left empty. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Wounded")
+    FName WoundedSimBone = TEXT("spine_01");
 
     // ── Stunt timing ─────────────────────────────────────────────────────────
 
@@ -263,7 +291,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
     FName UpperSimBone = TEXT("spine_03");
 
-    /** Root of the simulation chain for mid/bot hits and the persistent low-health sim. All bones below this receive physics. */
+    /** Root of the simulation chain for mid/bot hits. All bones below this receive physics during a stunt. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
     FName MidSimBone = TEXT("spine_01");
 
@@ -325,6 +353,8 @@ private:
 
     // ── Hit state ─────────────────────────────────────────────────────────────
     int32         AttackSide     = 0;
+    float         BlacklistedSimScale  = 1.f;
+    float         BlacklistedPushScale = 1.f;
     FName         HitBone;
     TArray<FName> PhysicsBones;
     FVector       HitDir         = FVector::ZeroVector;
@@ -339,9 +369,9 @@ private:
     bool                bDoOnceFired        = false;
 
     // ── Low health sim state ──────────────────────────────────────────────────
-    bool  bLowHealthActive = false;
-    float LowHealthElapsed = 0.f;
-    float LowHealthBlend   = 0.f;
+    bool  bWoundedActive = false;
+    float WoundedElapsed = 0.f;
+    float WoundedBlend   = 0.f;
 
     // ── Physics blend-out state ───────────────────────────────────────────────
     bool  bBlendingOutPhysics = false;
@@ -382,5 +412,5 @@ private:
     void ReactiveSteps(float DeltaTime);
     void SimFinish();
     void OpenTickGate();
-    void LowHealthTick(float DeltaTime);
+    void WoundedTick(float DeltaTime);
 };

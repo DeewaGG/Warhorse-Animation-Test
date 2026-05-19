@@ -110,10 +110,30 @@ void UThrustSystemNodes::ThrustSetUp(
         ? VictimActor->FindComponentByClass<USkeletalMeshComponent>()
         : nullptr;
 
-    // Prefer the live bone position over HitLocation when a victim mesh and bone name are available.
-    const FVector RawTargetWorld = (VictimMesh && TargetBoneName != NAME_None)
-        ? VictimMesh->GetSocketLocation(TargetBoneName)
-        : HitLocation;
+    // If the hit bone has sockets, snap the impact point to the closest one so the IK
+    // target is a precise contact point rather than the bone origin.
+    FName BestVictimSocket = NAME_None;
+    if (VictimMesh && TargetBoneName != NAME_None)
+    {
+        if (USkeletalMesh* SkelMesh = VictimMesh->GetSkeletalMeshAsset())
+        {
+            float MinDistSqV = MAX_FLT;
+            for (const USkeletalMeshSocket* Socket : SkelMesh->GetActiveSocketList())
+            {
+                if (!Socket || Socket->BoneName != TargetBoneName) continue;
+                const FVector SW  = VictimMesh->GetSocketLocation(Socket->SocketName);
+                const float   DSq = FVector::DistSquared(HitLocation, SW);
+                if (DSq < MinDistSqV) { MinDistSqV = DSq; BestVictimSocket = Socket->SocketName; }
+            }
+        }
+    }
+
+    // Prefer the closest victim socket → live bone → raw hit location, in that order.
+    const FVector RawTargetWorld = (VictimMesh && BestVictimSocket != NAME_None)
+        ? VictimMesh->GetSocketLocation(BestVictimSocket)
+        : (VictimMesh && TargetBoneName != NAME_None)
+            ? VictimMesh->GetSocketLocation(TargetBoneName)
+            : HitLocation;
 
     // Pick the contact socket that is closest to the hit location (e.g., tip vs base of blade).
     FName   ClosestSocket      = ContactSockets[0];
@@ -200,6 +220,7 @@ void UThrustSystemNodes::ThrustSetUp(
     State.PivotBone        = PivotBone;
     State.ContactSocket    = ClosestSocket;
     State.TargetBone       = TargetBoneName;
+    State.TargetSocket     = BestVictimSocket;
     State.TargetBoneWorld  = TargetWorld;
     State.TargetBoneOffset = TargetBoneOffset;
     State.DomStartRotCS    = StartRotCS.Rotator();
@@ -265,13 +286,14 @@ void UThrustSystemNodes::ThrustTick(
     const FQuat TargetRotCS = State.DomTargetRotCS.Quaternion().GetNormalized();
     const FQuat RotAdditive = FQuat::Slerp(FQuat::Identity, (RestRotCS.Inverse() * TargetRotCS).GetNormalized(), Alpha).GetNormalized();
 
-    // Re-query victim bone each frame so the approach tracks a moving target without a pop at
-    // handoff to ThrustPlant (which also reads the live bone on its first frame).
+    // Re-query victim bone/socket each frame so the approach tracks a moving target without a pop
+    // at handoff to ThrustPlant (which also reads the live position on its first frame).
     USkeletalMeshComponent* VictimMesh = State.VictimActor
         ? State.VictimActor->FindComponentByClass<USkeletalMeshComponent>()
         : nullptr;
-    const FVector LiveTargetWorld = (VictimMesh && State.TargetBone != NAME_None)
-        ? VictimMesh->GetSocketLocation(State.TargetBone) + State.TargetBoneOffset
+    const FName   LiveTarget      = (State.TargetSocket != NAME_None) ? State.TargetSocket : State.TargetBone;
+    const FVector LiveTargetWorld = (VictimMesh && LiveTarget != NAME_None)
+        ? VictimMesh->GetSocketLocation(LiveTarget) + State.TargetBoneOffset
         : State.TargetBoneWorld;
 
     // Socket-feedback accumulator scaled by Alpha: same convergence pattern as ThrustPlant so
@@ -319,11 +341,13 @@ void UThrustSystemNodes::ThrustPlant(
         ? State.VictimActor->FindComponentByClass<USkeletalMeshComponent>()
         : nullptr;
 
+    const FName PlantLiveTarget = (State.TargetSocket != NAME_None) ? State.TargetSocket : State.TargetBone;
+
     if (State.FramesRemaining == 0)
     {
         // Capture world-space anchor on the first plant frame.
-        State.PlantedTargetBoneWorld = (VictimMesh && State.TargetBone != NAME_None)
-            ? VictimMesh->GetSocketLocation(State.TargetBone) + State.TargetBoneOffset
+        State.PlantedTargetBoneWorld = (VictimMesh && PlantLiveTarget != NAME_None)
+            ? VictimMesh->GetSocketLocation(PlantLiveTarget) + State.TargetBoneOffset
             : State.TargetBoneWorld;
 
         // World-anchored hand rotation: must be computed before PlantedHandWorldPos because
@@ -338,8 +362,8 @@ void UThrustSystemNodes::ThrustPlant(
         State.FramesRemaining = -1;
     }
 
-    const FVector CurrentTargetWorld = (VictimMesh && State.TargetBone != NAME_None)
-        ? VictimMesh->GetSocketLocation(State.TargetBone) + State.TargetBoneOffset
+    const FVector CurrentTargetWorld = (VictimMesh && PlantLiveTarget != NAME_None)
+        ? VictimMesh->GetSocketLocation(PlantLiveTarget) + State.TargetBoneOffset
         : State.TargetBoneWorld;
 
     // Socket-feedback accumulator: read actual socket position (reflects last frame's IK result),
@@ -362,7 +386,17 @@ void UThrustSystemNodes::ThrustPlant(
     SetAnimVec(AnimInst, State.SlaveLocGoal, DomAdditive);
     SetAnimRot(AnimInst, State.SlaveRotGoal, RotAdditive.Rotator());
 
-    if (State.PlantDuration > 0.f)
+    // Early exit if the hand has drifted beyond MaxDistFromBone from LimitBone.
+    // This lets recover run normally rather than snapping to idle.
+    if (!bOutComplete && State.LimitBone != NAME_None && State.MaxDistFromBone > 0.f)
+    {
+        const FVector LimitBoneCS = CompTW.InverseTransformPosition(
+            State.AttackerMesh->GetBoneLocation(State.LimitBone));
+        if (FVector::Dist(State.DomRestPos + DomAdditive, LimitBoneCS) > State.MaxDistFromBone)
+            bOutComplete = true;
+    }
+
+    if (!bOutComplete && State.PlantDuration > 0.f)
     {
         State.PlantElapsed += DeltaTime;
         if (State.PlantElapsed >= State.PlantDuration)

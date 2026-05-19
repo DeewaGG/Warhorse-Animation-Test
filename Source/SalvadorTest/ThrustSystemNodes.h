@@ -70,6 +70,10 @@ struct FThrustState
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
     FName TargetBone;
 
+    /** Closest socket on the hit bone to the impact point, if the victim mesh has any sockets on that bone. Takes priority over TargetBone for the lock position. NAME_None = use bone origin. */
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
+    FName TargetSocket;
+
     /** Fallback world position of the target, used when no victim mesh is available. */
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|IK")
     FVector TargetBoneWorld = FVector::ZeroVector;

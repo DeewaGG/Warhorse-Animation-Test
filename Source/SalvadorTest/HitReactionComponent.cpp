@@ -69,11 +69,16 @@ void UHitReactionComponent::SetupComponent()
 // Blacklisted bones still run the full stunt — they just skip the HP decrement.
 void UHitReactionComponent::HitW_Physics(int32 InAttackSide, FName InBoneHit, FVector InHitDir, double InHitStrength)
 {
-    if (!BlacklistedHitBones.Contains(InBoneHit))
+    const FBlacklistedBoneSettings* Settings  = BlacklistedHitBones.Find(InBoneHit);
+    const bool                       bBlacklisted = (Settings != nullptr);
+    if (!bBlacklisted)
         CurrentHP = FMath::Max(0, CurrentHP - 1);
 
+    BlacklistedSimScale  = bBlacklisted ? FMath::Clamp(Settings->SimScale,      0.f, 1.f) : 1.f;
+    BlacklistedPushScale = bBlacklisted ? FMath::Max  (Settings->PushForceScale, 0.f)      : 1.f;
+
     AttackSide = InAttackSide;
-    ProtectHit(InHitDir, InHitStrength);
+    ProtectHit(InHitDir, bBlacklisted ? InHitStrength * (double)BlacklistedImpulseScale : InHitStrength);
 
     // Pelvis and root hits redirect to a stable fallback so physics motors have a valid anchor
     HitBone = (InBoneHit == PelvisBoneName || InBoneHit.IsNone()) ? FallbackHitBone : InBoneHit;
@@ -199,32 +204,29 @@ void UHitReactionComponent::OpenTickGate()
 // Drives a persistent low-level physics sim on MidSimBone after the character reaches 1 HP.
 // Two sine waves at different frequencies produce an organic struggling feel that never exactly
 // repeats — wave 1 mimics laboured weight-shifting, wave 2 adds involuntary muscle tremor.
-void UHitReactionComponent::LowHealthTick(float DeltaTime)
+void UHitReactionComponent::WoundedTick(float DeltaTime)
 {
-    if (!bLowHealthActive || !Mesh || bBlendingOutPhysics) return;
+    if (!bWoundedActive || !Mesh || bBlendingOutPhysics) return;
 
-    LowHealthElapsed += DeltaTime;
+    WoundedElapsed += DeltaTime;
 
-    // Safety timeout: stops the sim if the character is never finished off
-    if (LowHealthTickTimeout > 0.f && LowHealthElapsed >= LowHealthTickTimeout)
+    // Safety timeout: blend out smoothly instead of hard-stopping to avoid a physics snap
+    if (WoundedTickTimeout > 0.f && WoundedElapsed >= WoundedTickTimeout)
     {
-        Mesh->SetAllBodiesBelowPhysicsBlendWeight(MidSimBone, 0.f, false, true);
-        Mesh->SetAllBodiesBelowSimulatePhysics(MidSimBone, false, true);
-        bLowHealthActive = false;
-        SetComponentTickEnabled(false);
+        BlendOutPhysics(WoundedTimeoutBlendOutDuration);
         return;
     }
 
-    const float BlendAlpha = (LowHealthTransitionTime > 0.f)
-        ? FMath::Clamp(LowHealthElapsed / LowHealthTransitionTime, 0.f, 1.f)
+    const float BlendAlpha = (WoundedTransitionTime > 0.f)
+        ? FMath::Clamp(WoundedElapsed / WoundedTransitionTime, 0.f, 1.f)
         : 1.f;
-    LowHealthBlend = LowHealthSimWeight * BlendAlpha;
+    WoundedBlend = WoundedSimWeight * BlendAlpha;
 
-    const float Wave1 = LowHealthOscAmplitude  * FMath::Sin(LowHealthOscFrequency  * LowHealthElapsed * 2.f * PI);
-    const float Wave2 = LowHealthOscAmplitude2 * FMath::Sin(LowHealthOscFrequency2 * LowHealthElapsed * 2.f * PI);
+    const float Wave1 = WoundedOscAmplitude  * FMath::Sin(WoundedOscFrequency  * WoundedElapsed * 2.f * PI);
+    const float Wave2 = WoundedOscAmplitude2 * FMath::Sin(WoundedOscFrequency2 * WoundedElapsed * 2.f * PI);
 
-    const float EffBlend = FMath::Clamp(LowHealthBlend + Wave1 + Wave2, 0.f, 1.f);
-    Mesh->SetAllBodiesBelowPhysicsBlendWeight(MidSimBone, EffBlend, false, true);
+    const float EffBlend = FMath::Clamp(WoundedBlend + Wave1 + Wave2, 0.f, 1.f);
+    Mesh->SetAllBodiesBelowPhysicsBlendWeight(WoundedSimBone, EffBlend, false, true);
 }
 
 // Advances the stunt curve sampler and returns true when the stunt duration has elapsed.
@@ -261,7 +263,7 @@ bool UHitReactionComponent::CurveTickValues(float DeltaTime)
 void UHitReactionComponent::SimulationWeight()
 {
     if (!Mesh) return;
-    const float MaxWeight = (AttackSide == 2) ? BotSideMaxBlendWeight : 1.f;
+    const float MaxWeight = ((AttackSide == 2) ? BotSideMaxBlendWeight : 1.f) * BlacklistedSimScale;
     for (const FName& Bone : PhysicsBones)
         Mesh->SetAllBodiesBelowPhysicsBlendWeight(Bone, (float)SimValue * MaxWeight, false, true);
 }
@@ -277,7 +279,8 @@ void UHitReactionComponent::PushVictim()
 
     if (FVector2D::Distance(VictimXY, PushGoal) <= 0.1f) return;
 
-    const float scale = (AttackSide == 2) ? 0.f : (float)(SimValue * (VictimPushForce / 10.0) + 0.1);
+    const float scale = (AttackSide == 2) ? 0.f
+        : (float)(SimValue * (VictimPushForce / 10.0) + 0.1) * BlacklistedPushScale;
 
     if (APawn* Pawn = Cast<APawn>(BPVictim))
         Pawn->AddMovementInput(HitDir, scale);
@@ -354,24 +357,24 @@ void UHitReactionComponent::ReactiveSteps(float DeltaTime)
 }
 
 // Smoothly ramps the low-health physics blend to zero over Duration seconds.
-// Only has effect while bLowHealthActive — a no-op otherwise.
+// Only has effect while bWoundedActive — a no-op otherwise.
 void UHitReactionComponent::BlendOutPhysics(float Duration)
 {
-    if (!bLowHealthActive || !Mesh) return;
+    if (!bWoundedActive || !Mesh) return;
     bBlendingOutPhysics = true;
     BlendOutDuration    = FMath::Max(Duration, 0.f);
     BlendOutElapsed     = 0.f;
-    BlendOutStartWeight = LowHealthBlend;
+    BlendOutStartWeight = WoundedBlend;
     SetComponentTickEnabled(true);
 }
 
 // Hard-stops the low-health sim with no blend. Use BlendOutPhysics() for a graceful transition.
-void UHitReactionComponent::StopLowHealthSim()
+void UHitReactionComponent::StopWoundedSim()
 {
-    if (!bLowHealthActive || !Mesh) return;
-    Mesh->SetAllBodiesBelowPhysicsBlendWeight(MidSimBone, 0.f, false, true);
-    Mesh->SetAllBodiesBelowSimulatePhysics(MidSimBone, false, true);
-    bLowHealthActive = false;
+    if (!bWoundedActive || !Mesh) return;
+    Mesh->SetAllBodiesBelowPhysicsBlendWeight(WoundedSimBone, 0.f, false, true);
+    Mesh->SetAllBodiesBelowSimulatePhysics(WoundedSimBone, false, true);
+    bWoundedActive = false;
 }
 
 // Writes the physics blend weight directly for all PhysicsBones — called from BP during a
@@ -392,7 +395,7 @@ void UHitReactionComponent::ActivateRagdoll()
     if (!Mesh || !PhysicAnimComp) return;
 
     // Clear stunt state so TickComponent routes into the ragdoll branch exclusively
-    bLowHealthActive    = false;
+    bWoundedActive    = false;
     Mesh->SetAllBodiesBelowSimulatePhysics(RootSimBone, false, true);
     if (ABP) ABP->bIsStunned = false;
     bSimFinishTriggered = false;
@@ -417,17 +420,17 @@ void UHitReactionComponent::ActivateRagdoll()
 // Called twice per stunt cycle:
 //   1. At curve end — disables stunt simulation on all bones below root.
 //   2. After foot repositioning completes — optionally re-enables MidSimBone for low-health.
-// Re-enabling MidSimBone at the current LowHealthBlend avoids a weight snap mid low-health cycle.
+// Re-enabling MidSimBone at the current WoundedBlend avoids a weight snap mid low-health cycle.
 void UHitReactionComponent::SimFinish()
 {
     if (!Mesh) return;
     Mesh->SetAllBodiesBelowSimulatePhysics(RootSimBone, false, true);
 
-    if (bLowHealthActive && PhysicAnimComp)
+    if (bWoundedActive && PhysicAnimComp)
     {
-        PhysicAnimComp->ApplyPhysicalAnimationProfileBelow(MidSimBone, PhysicalAnimProfile, true, true);
-        Mesh->SetAllBodiesBelowSimulatePhysics(MidSimBone, true, true);
-        Mesh->SetAllBodiesBelowPhysicsBlendWeight(MidSimBone, LowHealthBlend, false, true);
+        PhysicAnimComp->ApplyPhysicalAnimationProfileBelow(WoundedSimBone, PhysicalAnimProfile, true, true);
+        Mesh->SetAllBodiesBelowSimulatePhysics(WoundedSimBone, true, true);
+        Mesh->SetAllBodiesBelowPhysicsBlendWeight(WoundedSimBone, WoundedBlend, false, true);
     }
 }
 
@@ -532,17 +535,17 @@ void UHitReactionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
                 bRepositioning      = false;
 
                 // Activate low-health sim on the hit that brings HP to exactly 1
-                if (CurrentHP == 1 && !bLowHealthActive && PhysicAnimComp)
+                if (CurrentHP == 1 && !bWoundedActive && PhysicAnimComp)
                 {
-                    bLowHealthActive = true;
-                    LowHealthElapsed = 0.f;
-                    LowHealthBlend   = 0.f;
-                    PhysicAnimComp->ApplyPhysicalAnimationProfileBelow(MidSimBone, PhysicalAnimProfile, true, true);
-                    Mesh->SetAllBodiesBelowSimulatePhysics(MidSimBone, true, true);
-                    Mesh->SetAllBodiesBelowPhysicsBlendWeight(MidSimBone, 0.f, false, true);
+                    bWoundedActive = true;
+                    WoundedElapsed = 0.f;
+                    WoundedBlend   = 0.f;
+                    PhysicAnimComp->ApplyPhysicalAnimationProfileBelow(WoundedSimBone, PhysicalAnimProfile, true, true);
+                    Mesh->SetAllBodiesBelowSimulatePhysics(WoundedSimBone, true, true);
+                    Mesh->SetAllBodiesBelowPhysicsBlendWeight(WoundedSimBone, 0.f, false, true);
                 }
 
-                if (!bLowHealthActive)
+                if (!bWoundedActive)
                     SetComponentTickEnabled(false);
             }
         }
@@ -563,7 +566,7 @@ void UHitReactionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
         }
     }
 
-    LowHealthTick(DeltaTime);
+    WoundedTick(DeltaTime);
 
     // ── Low-health blend-out ──────────────────────────────────────────────────
     if (bBlendingOutPhysics && Mesh)
@@ -571,11 +574,11 @@ void UHitReactionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
         BlendOutElapsed += DeltaTime;
         const float T = (BlendOutDuration > 0.f)
             ? FMath::Clamp(BlendOutElapsed / BlendOutDuration, 0.f, 1.f) : 1.f;
-        Mesh->SetAllBodiesBelowPhysicsBlendWeight(MidSimBone, FMath::Lerp(BlendOutStartWeight, 0.f, T), false, true);
+        Mesh->SetAllBodiesBelowPhysicsBlendWeight(WoundedSimBone, FMath::Lerp(BlendOutStartWeight, 0.f, T), false, true);
         if (T >= 1.f)
         {
-            Mesh->SetAllBodiesBelowSimulatePhysics(MidSimBone, false, true);
-            bLowHealthActive    = false;
+            Mesh->SetAllBodiesBelowSimulatePhysics(WoundedSimBone, false, true);
+            bWoundedActive    = false;
             bBlendingOutPhysics = false;
             if (!bIsRagdoll)
                 SetComponentTickEnabled(false);
