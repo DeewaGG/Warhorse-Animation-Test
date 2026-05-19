@@ -156,6 +156,10 @@ When the attacker's weapon connects with the victim, the attacker's hands need t
 
 ### 4.1 Three-Phase State Machine
 
+At the start of `HitImpact`, the attacker's `CharacterMovement` is set to `DisableMovement`. This lock persists through all three phases and is cleared by `SetMovementMode(MOVE_Walking)` when `ThrustRecover` completes. The lock prevents the attacker from drifting away from the victim during the plant, which would otherwise pull the socket-feedback accumulator out of convergence range.
+
+`ThrustSetUp` determines the precise IK target before Phase 1 begins. It iterates all sockets on the hit bone and selects the closest one to the raw hit location. If no socket is found on that bone, it falls back to the bone origin. If the victim has no skeletal mesh reference, it falls back to the raw hit location. Socket-based targets are more stable than raw bone origins because rigger-placed sockets sit at deliberate contact points on the blade rather than at the bone pivot.
+
 The thrust sequence has three explicit phases managed by `FThrustState`:
 
 **Phase 1 - Approach (`ThrustTick`):**  
@@ -225,9 +229,7 @@ This decouples the thrust library from any specific ABP subclass. The same `UThr
 
 A `MaxDistFromBone` clamp (configurable; default 50 cm in C++, set higher in `BP_PlayerCharacter` - typically around `spine_03`) exits the plant early if the dom hand drifts beyond arm reach. Without this, a long-distance hit would produce a visibly stretched arm. The stab geometry is refined at setup via a line trace on a configurable `StabTraceChannel` from the contact socket to the raw target location: the impact point is offset by `StabDepth` along the trace direction, producing a natural blade-penetration depth rather than hand-to-surface contact.
 
-`SkipPlantBones` is a list of bones whose collision should not trigger a plant - the weapon slides or bounces off them rather than embedding. The canonical example is the victim's own weapon bones (`weapon_l`, `weapon_r`): if the attacker's sword contacts the enemy sword's physics body, the trace returns a weapon bone as the hit target. Planting into that would lock the attacker's hand onto a moving weapon, which produces erratic IK. With those bones on the skip list, the ThrustSystem detects the contact, skips the plant phase, and immediately enters the exit reverse - visually reading as a parry or glancing blow.
-
-Early exits (skipped bone, distance exceeded) use a **separate set of reverse parameters** (`ExitReverseRateMultiplier`, `ExitReverseStartOffset`, `ExitFixedReversePosition`) distinct from the normal recovery parameters. This allows the designer to tune a clean, fast pull-back for misses and deflections independently from the full planted-contact recovery, without one set of values compromising the other.
+`BlacklistedHitBones` on `UHitReactionComponent` marks bones that do not count as valid hits for HP tracking. The ThrustSystem reads the same list at hit time: when the weapon contacts a blacklisted bone, `HitImpact` passes `BlacklistedPlantDuration` (default 0.01 s) rather than the normal `PlantDuration`. The plant runs but exits almost immediately, producing a glancing read without a full embed. The recovery path is identical to a normal hit, so no separate pull-back parameters are needed and the attacker's weapon retracts cleanly from any contact point.
 
 ### 4.5 Known Behavior: Instability at Large Offsets
 
@@ -250,7 +252,7 @@ void UHitReactionComponent::HitW_Physics(
 
 Three decisions happen immediately:
 
-1. **HP decrement** - bones on the blacklist (weapon handles, etc.) do not count as valid hits.
+1. **HP decrement** - bones in `BlacklistedHitBones` skip HP decrement but still trigger the full stunt and recovery. The map value (`FBlacklistedBoneSettings`) carries per-bone `SimScale` (physics blend weight multiplier) and `PushForceScale` (push force multiplier), so individual bones can produce a lighter or heavier reaction independently of the HP logic. A global `BlacklistedImpulseScale` further scales the physics impulse for all blacklisted hits.
 2. **Bone remapping** - `pelvis` and `None` map to `spine_01` (the fallback). The pelvis is the root of the physics hierarchy; simulating it directly causes the character to drop to the ground on the first frame. The fallback routes the simulation to a bone the physical animation profile can actually control.
 3. **Physics bone selection by attack side:**
 
@@ -306,20 +308,20 @@ This bridges a problem endemic to physical hit reactions: feet end up planted in
 
 ### 5.5 Low-Health Continuous Simulation
 
-At `CurrentHP == 1` (one hit remaining), the system activates `bLowHealthActive` after repositioning completes. Rather than random impulses, the low-health behaviour is driven by **two additive sine waves** modulating the physics blend weight each frame:
+At `CurrentHP == 1` (one hit remaining), the system activates `bWoundedActive` after repositioning completes. Rather than random impulses, the low-health behaviour is driven by **two additive sine waves** modulating the physics blend weight each frame:
 
 ```
-Wave1    = OscAmplitude  x sin(OscFrequency  x elapsed x 2pi)   // slow: laboured breathing
-Wave2    = OscAmplitude2 x sin(OscFrequency2 x elapsed x 2pi)   // fast: muscle tremor
+Wave1    = WoundedOscAmplitude  x sin(WoundedOscFrequency  x elapsed x 2pi)   // slow: laboured breathing
+Wave2    = WoundedOscAmplitude2 x sin(WoundedOscFrequency2 x elapsed x 2pi)   // fast: muscle tremor
 
-EffBlend = clamp(LowHealthBlend + Wave1 + Wave2, 0, 1)
+EffBlend = clamp(WoundedBlend + Wave1 + Wave2, 0, 1)
 ```
 
-The two waves run at different frequencies (defaults: 0.35 Hz and 0.8 Hz) so their combined pattern never exactly repeats, producing an organic, non-mechanical feel. The base `LowHealthBlend` ramps in over `LowHealthTransitionTime` from 0 to `LowHealthSimWeight`, so the oscillation starts subtle and reaches full amplitude gradually.
+The two waves run at different frequencies (defaults: 0.35 Hz and 0.8 Hz) so their combined pattern never exactly repeats, producing an organic, non-mechanical feel. The base `WoundedBlend` ramps in over `WoundedTransitionTime` from 0 to `WoundedSimWeight`, so the oscillation starts subtle and reaches full amplitude gradually. Simulation runs on the `WoundedSimBone` chain (default `spine_01`).
 
-`LowHealthTickTimeout` places an upper bound on how long the simulation runs - after that duration the physics shut down automatically. The system can also be ended early via `StopLowHealthSim()` (immediate) or `BlendOutPhysics(Duration)` (smooth fade-out). The attacker calls `BlendOutPhysics` via `DisableNearbyVictimsPhysics()` at attack start, which blends out low-health physics on nearby wounded victims within `NearbyPhysicsDisableRadius` so weapon traces can register cleanly against their mesh without the simulation interfering with collision.
+`WoundedTickTimeout` places an upper bound on how long the simulation runs. When it fires, the physics blend fades out over `WoundedTimeoutBlendOutDuration` rather than cutting immediately. The system can also be ended early via `StopWoundedSim()` (immediate) or `BlendOutPhysics(Duration)` (smooth fade-out). The attacker calls `BlendOutPhysics` via `DisableNearbyVictimsPhysics()` at attack start, which blends out wounded physics on nearby victims within `NearbyPhysicsDisableRadius` so weapon traces can register cleanly against their mesh without the simulation interfering with collision.
 
-`SimFinish` is aware of the low-health state: if `bLowHealthActive` is true, it re-enables mid-bone physics at the current `LowHealthBlend` weight after each stunt cycle ends, so a subsequent hit does not permanently disable the tremor.
+`SimFinish` is aware of the wounded state: if `bWoundedActive` is true, it re-enables mid-bone physics at the current `WoundedBlend` weight after each stunt cycle ends, so a subsequent hit does not permanently disable the tremor.
 
 ---
 
@@ -808,7 +810,7 @@ Game/
 | **Death / ragdoll** | `ActivateRagdoll()` - full-body Chaos ragdoll with curve-driven blend-in and directional impulse | `UHitReactionComponent::ActivateRagdoll` |
 | **Bonus: Lock-on targeting system** | Sphere-sweep on dedicated channel, `UTargetComponent` slots, material color delegate | `UTargetingSystemComponent`, `BP_Victim` |
 | **Bonus: Target visual feedback** | Billboard WPO bracket (`M_TargetSelection`) + scene desaturation post-process (`PP_SelectTarget`) | `Game/TechArt/Materials/` |
-| **Bonus: Low-health idle simulation** | Continuous spine physics blend driven by dual sine wave oscillation at `CurrentHP == 1` | `UHitReactionComponent::LowHealthTick` |
+| **Bonus: Low-health idle simulation** | Continuous spine physics blend driven by dual sine wave oscillation at `CurrentHP == 1` | `UHitReactionComponent::WoundedTick` |
 | **Bonus: AttackData-driven hand IK** | Per-slot hand height and rotation offsets from DataTable, per-axis rotation limits | `UAnimInstanceBase::ComputeHandHeightIK`, `AttackData.h` |
 | **Bonus: Camera turn -> playrate** | Mouse yaw axis -> `TurningSpeed` (editable scale `TurningSpeedMultiplier`, default 1.0) -> ABP turn animation playrate | `APlayableCharacter::TurnValuesUpdate` |
 
