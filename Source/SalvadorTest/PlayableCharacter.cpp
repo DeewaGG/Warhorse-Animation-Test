@@ -15,7 +15,6 @@ APlayableCharacter::APlayableCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // ── Character movement ────────────────────────────────────────────────────
     bUseControllerRotationYaw = true;
 
     UCharacterMovementComponent* Move = GetCharacterMovement();
@@ -27,20 +26,17 @@ APlayableCharacter::APlayableCharacter()
     Move->bOrientRotationToMovement        = false;
     Move->PerchRadiusThreshold             = 15.f;
 
-    // ── Camera boom ───────────────────────────────────────────────────────────
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
     CameraBoom->SetRelativeLocation(FVector(0.f, 40.f, 80.f));
     CameraBoom->TargetArmLength            = 90.f;
     CameraBoom->bUsePawnControlRotation    = true;
 
-    // ── Follow camera ─────────────────────────────────────────────────────────
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->SetRelativeLocation(FVector(10.f, 0.f, 0.f));
     FollowCamera->bUsePawnControlRotation  = false;
 
-    // ── Targeting system ──────────────────────────────────────────────────────
     TargetingSystem = CreateDefaultSubobject<UTargetingSystemComponent>(TEXT("TargetingSystem"));
 }
 
@@ -112,6 +108,8 @@ void APlayableCharacter::OnMove(const FInputActionValue& Value)
 
 void APlayableCharacter::OnMouseLook(const FInputActionValue& Value)
 {
+    // Block camera rotation while the sword is planted so the world-anchored IK goals
+    // don't drift relative to the attacker mesh during the plant phase.
     if (HitImpactComp && HitImpactComp->IsThrusting()) return;
 
     const FVector2D Axes = Value.Get<FVector2D>();
@@ -134,6 +132,7 @@ void APlayableCharacter::TurnValuesUpdate(double Axis)
     UWorld* World = GetWorld();
     if (!World) return;
     const double DeltaTime = World->GetDeltaSeconds();
+    // FInterpTo smooths the speed rather than snapping, which drives a smooth turn anim blend.
     Turning_Speed = FMath::FInterpTo((float)Turning_Speed, (float)FMath::Abs(Axis), (float)DeltaTime, 10.f);
     if (Axis > 0.0) Turning_R = true;
     else            Turning_L = true;
@@ -141,6 +140,7 @@ void APlayableCharacter::TurnValuesUpdate(double Axis)
 
 void APlayableCharacter::CamForwardUpdate()
 {
+    // Scale to a far world point so SpineLookAt receives a meaningful world-space anchor.
     Cam_Forward = FollowCamera->GetForwardVector() * 10000.f;
 }
 
@@ -179,6 +179,8 @@ void APlayableCharacter::OnAttackStarted(const FInputActionValue& Value)
 
     TargetingSystem->OnAttackStart();
 
+    // Blend out physics on nearby wounded victims before the montage starts so weapon traces
+    // can register hits against them without rigid-body interference.
     if (HitImpactComp)
         HitImpactComp->DisableNearbyVictimsPhysics();
 

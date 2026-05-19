@@ -8,7 +8,9 @@
 UTargetingSystemComponent::UTargetingSystemComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	// Only ticks while aiming; enabled/disabled by BeginAiming/EndAiming.
 	PrimaryComponentTick.bStartWithTickEnabled = false;
+	TraceChannel = ECC_GameTraceChannel1;
 }
 
 void UTargetingSystemComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -48,12 +50,14 @@ void UTargetingSystemComponent::PerformTrace()
 	TArray<FHitResult> HitResults;
 	FCollisionShape Shape = FCollisionShape::MakeSphere(TraceRadius);
 	World->SweepMultiByChannel(
-		HitResults, Start, End, FQuat::Identity, ECC_GameTraceChannel1, Shape);
+		HitResults, Start, End, FQuat::Identity, TraceChannel, Shape);
 
 	UTargetComponent* BestTarget = nullptr;
 	AActor* BestActor = nullptr;
 	float BestDot = -1.f;
 
+	// Pick the component with the highest dot product against camera forward — i.e., the most
+	// centered target from the player's perspective.
 	for (const FHitResult& Hit : HitResults)
 	{
 		UTargetComponent* TC = Cast<UTargetComponent>(Hit.GetComponent());
@@ -102,6 +106,7 @@ void UTargetingSystemComponent::SetCurrentTargetActor(AActor* NewActor)
 		if (Target) Target->SetVisible(false);
 	}
 
+	// Reset the cache; the new actor's components are fetched below.
 	CachedTargetComponents.Reset();
 	CurrentTargetActor = NewActor;
 

@@ -15,7 +15,7 @@ struct FHandIKSlotData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
     FRotator RotationOffset = FRotator::ZeroRotator;
 
-    // Added to hit location Z when the victim is in low-health (wounded) state
+    // Extra Z added to hit location when the victim is in low-health (crouched) state.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
     float WoundedZOffset = 0.f;
 };
@@ -43,7 +43,7 @@ struct FHandIKLimits
 {
     GENERATED_BODY()
 
-    // X = min, Y = max
+    // X = min, Y = max (component-space Z offset)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Limits")
     FVector2D HeightLimit = FVector2D(-100.f, 100.f);
 
@@ -73,6 +73,7 @@ struct FAttackGlobalLimits
     FVector2D HipHeightLimit = FVector2D(-50.f, 50.f);
 };
 
+// DataTable row keyed by attack montage FName. One row per montage; three slot variants per row.
 USTRUCT(BlueprintType)
 struct FAttackMontageData : public FTableRowBase
 {

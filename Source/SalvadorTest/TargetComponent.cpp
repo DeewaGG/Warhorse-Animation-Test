@@ -6,8 +6,10 @@ UTargetComponent::UTargetComponent()
 
     SetCollisionEnabled(ECollisionEnabled::QueryOnly);
     SetCollisionResponseToAllChannels(ECR_Ignore);
+    // Must match the sweep channel used by UTargetingSystemComponent (ECC_GameTraceChannel1).
     SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
 
+    // Hidden until UTargetingSystemComponent calls SetVisible(true) on aim start.
     SetHiddenInGame(true);
 }
 

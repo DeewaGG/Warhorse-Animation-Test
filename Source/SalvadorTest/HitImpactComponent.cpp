@@ -12,6 +12,7 @@ UHitImpactComponent::UHitImpactComponent()
 {
     PrimaryComponentTick.bCanEverTick          = true;
     PrimaryComponentTick.bStartWithTickEnabled = false;
+    StabTraceChannel = ECC_GameTraceChannel2;
 }
 
 void UHitImpactComponent::BeginPlay()
@@ -31,13 +32,14 @@ void UHitImpactComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 
     if (DeltaTime <= 0.f) return;
 
-    // Spine look-at alpha — interpolates independently of thrust phase
+    // Spine look-at interpolates independently of thrust phase so it fades out smoothly
+    // after ThrustEnd even when the thrust state machine has already stopped.
     const float SpineInterp = (SpineTargetAlpha < SpineCurrentAlpha)
         ? SpineInterpOutSpeed : SpineInterpInSpeed;
     SpineCurrentAlpha = FMath::FInterpTo(SpineCurrentAlpha, SpineTargetAlpha, DeltaTime, SpineInterp);
     if (AnimInstance) AnimInstance->SpineLookAtAlpha = SpineCurrentAlpha;
 
-    // Thrust state machine
+    // Three-phase thrust state machine: approach -> plant -> recover.
     if (bThrustActive)
     {
         if (bRecover)
@@ -52,22 +54,16 @@ void UHitImpactComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                 bThrustActive = false;
                 if (AnimInstance) AnimInstance->bHit = false;
                 SpineTargetAlpha = 0.f;
+                if (OwnerCharacter)
+                    OwnerCharacter->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
             }
         }
         else if (bThrust)
         {
-            bool bBlacklisted = false;
-            bool bComplete    = false;
-            UThrustSystemNodes::ThrustPlant(State, DeltaTime, bBlacklisted, bComplete);
+            bool bComplete = false;
+            UThrustSystemNodes::ThrustPlant(State, DeltaTime, bComplete);
 
             bRecover = bComplete;
-            if (bRecover && State.bExited)
-            {
-                State.MontageRate = CapturedMontageRate * ExitReverseRateMultiplier;
-                State.MontagePos  = bExitForceFixedReverseFrame
-                    ? ExitFixedReversePosition
-                    : CapturedMontageRawPos - ExitReverseStartOffset;
-            }
             if (bRecover && VictimActor)
             {
                 if (UHitReactionComponent* HRC = VictimActor->FindComponentByClass<UHitReactionComponent>())
@@ -85,7 +81,7 @@ void UHitImpactComponent::TickComponent(float DeltaTime, ELevelTick TickType,
         }
     }
 
-    // Stop ticking once thrust is done and spine has fully faded out
+    // Stop ticking once thrust is fully done and the spine alpha has faded to near-zero.
     if (!bThrustActive && SpineCurrentAlpha < 0.001f)
     {
         if (AnimInstance) AnimInstance->SpineLookAtAlpha = 0.f;
@@ -125,23 +121,28 @@ void UHitImpactComponent::HitImpact(AActor* HitActor, FVector HitLocation,
     bThrust       = false;
     bRecover      = false;
 
+    if (OwnerCharacter)
+        OwnerCharacter->GetCharacterMovement()->DisableMovement();
+
     AnimInstance->bHit = false;
 
     AnimInstance->SetSpineLookAtTarget(HitActor ? HitActor->GetActorLocation() : HitLocation);
-    SpineTargetAlpha = 0.f; // ThrustPlant drives SpineLookAtAlpha directly; component only fades post-ThrustEnd
+    // SpineTargetAlpha stays 0 here; ThrustPlant ramps SpineLookAtAlpha directly.
+    // This component only fades the alpha back out after ThrustEnd.
+    SpineTargetAlpha = 0.f;
 
     CapturedMontageRate   = AnimInstance->Montage_GetPlayRate(Montage);
     CapturedMontageRawPos = AnimInstance->Montage_GetPosition(Montage);
 
+    // Compute normal reverse parameters. Exit cases may override these after ThrustPlant completes.
     const float MontageRate = CapturedMontageRate * ReverseRateMultiplier;
     const float MontagePos  = bForceFixedReverseFrame
         ? FixedReversePosition
         : CapturedMontageRawPos - ReverseStartOffset;
     AnimInstance->Montage_SetPlayRate(Montage, 0.f);
 
-    // Apply the DataTable per-slot position offset to the hit location.
-    // PositionOffset is in attacker component space — transform to world so ThrustSetUp
-    // receives the correctly shifted target regardless of attacker orientation.
+    // Transform the DataTable per-slot position offset (stored in attacker component space) to
+    // world space so ThrustSetUp receives the correctly shifted target regardless of attacker orientation.
     FVector EffHitLocation = HitLocation;
     if (APlayableCharacter* PC = Cast<APlayableCharacter>(GetOwner()))
     {
@@ -163,20 +164,31 @@ void UHitImpactComponent::HitImpact(AActor* HitActor, FVector HitLocation,
         }
     }
 
+    float EffPlantDuration = PlantDuration;
+    if (HitActor)
+    {
+        if (UHitReactionComponent* HRC = HitActor->FindComponentByClass<UHitReactionComponent>())
+        {
+            if (HRC->BlacklistedHitBones.Contains(HitBone))
+                EffPlantDuration = BlacklistedPlantDuration;
+        }
+    }
+
     UThrustSystemNodes::ThrustSetUp(
         State, GetOwner(), HitActor,
         DomLocGoal, DomRotGoal, SlaveLocGoal, SlaveRotGoal,
-        ContactSockets, SkipPlantBones,
+        ContactSockets,
         EffHitLocation, HitBone,
-        HitReachDelay, PlantDuration, Montage, MontagePos, MontageRate,
+        HitReachDelay, EffPlantDuration, Montage, MontagePos, MontageRate,
         RecoverDuration, LimitBone, MaxDistFromBone,
         StabDepth, ArmReachPercent,
         HipLocGoal, HipFollowPercent,
         ArmRecoverDuration, HipRecoverDuration,
         bDebug,
         PelvisBone,
-        TEXT("SpineLookAtAdditiveRot"),
-        TEXT("SpineLookAtAlpha")
+        SpineRotVarName,
+        SpineAlphaVarName,
+        StabTraceChannel
     );
 
     AnimInstance->bHit = true;
@@ -194,7 +206,7 @@ void UHitImpactComponent::PhysicRecovery(FName BoneName, FVector ImpulseDirectio
     PhysAnim->SetSkeletalMeshComponent(Mesh);
 
     Mesh->SetAllBodiesBelowSimulatePhysics(BoneName, true, true);
-    PhysAnim->ApplyPhysicalAnimationProfileBelow(BoneName, TEXT("HitReaction"), true, true);
+    PhysAnim->ApplyPhysicalAnimationProfileBelow(BoneName, PhysicRecoveryProfile, true, true);
 
     if (ImpulseMagnitude > 0.f)
         Mesh->AddImpulse(ImpulseDirection.GetSafeNormal() * ImpulseMagnitude, BoneName, true);

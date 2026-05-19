@@ -26,7 +26,6 @@ public:
     virtual void BeginPlay() override;
     virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
-    // ── Components ────────────────────────────────────────────────────────────
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
     TObjectPtr<USpringArmComponent> CameraBoom;
 
@@ -36,7 +35,6 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Targeting")
     TObjectPtr<UTargetingSystemComponent> TargetingSystem;
 
-    // ── Input ─────────────────────────────────────────────────────────────────
     UPROPERTY(EditDefaultsOnly, Category = "Input")
     TObjectPtr<UInputMappingContext> DefaultMappingContext;
 
@@ -52,14 +50,14 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Input")
     TObjectPtr<UInputAction> IA_Aim;
 
-    // ── Combat ────────────────────────────────────────────────────────────────
     UPROPERTY(EditDefaultsOnly, Category = "Combat")
     TObjectPtr<UAnimMontage> AttackMontage;
 
+    // Keyed by AttackMontage FName; holds per-slot IK offsets and global limits.
     UPROPERTY(EditDefaultsOnly, Category = "Combat")
     TObjectPtr<UDataTable> AttackDataTable;
 
-    // ── ABP-facing variables ──────────────────────────────────────────────────
+    // ── ABP-facing variables (synced to UAnimInstanceBase each frame) ─────────
     UPROPERTY(BlueprintReadWrite, Category = "Animation")
     bool Turning_R = false;
 
@@ -72,6 +70,7 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "Animation")
     FVector Cam_Forward = FVector::ZeroVector;
 
+    // Scales camera yaw axis before it feeds TurnValuesUpdate; links camera rotation speed to turn anim playrate.
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation",
               meta = (ClampMin = "0.0"))
     float TurningSpeedMultiplier = 1.f;

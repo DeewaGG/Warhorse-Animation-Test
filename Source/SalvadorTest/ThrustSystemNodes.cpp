@@ -3,6 +3,8 @@
 #include "GameFramework/Character.h"
 
 // ── AnimInstance property accessors via reflection ────────────────────────────
+// Goal variable names are stored as FNames in FThrustState so the thrust system
+// is not coupled to any concrete AnimInstance subclass.
 
 static void SetAnimVec(UAnimInstance* Inst, FName PropName, const FVector& Val)
 {
@@ -60,8 +62,6 @@ static float GetAnimFloat(UAnimInstance* Inst, FName PropName)
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 void UThrustSystemNodes::ThrustSetUp(
     FThrustState& State,
     AActor* AttackerActor,
@@ -71,7 +71,6 @@ void UThrustSystemNodes::ThrustSetUp(
     FName SlaveLocGoal,
     FName SlaveRotGoal,
     const TArray<FName>& ContactSockets,
-    const TArray<FName>& SkipPlantBones,
     FVector HitLocation,
     FName TargetBoneName,
     float HitReachDelay,
@@ -91,7 +90,8 @@ void UThrustSystemNodes::ThrustSetUp(
     bool bDebug,
     FName PelvisBoneName,
     FName SpineRotVarName,
-    FName SpineAlphaVarName)
+    FName SpineAlphaVarName,
+    TEnumAsByte<ECollisionChannel> StabTraceChannel)
 {
     if (!AttackerActor || ContactSockets.Num() == 0 || HitReachDelay <= 0.f)
         return;
@@ -110,10 +110,12 @@ void UThrustSystemNodes::ThrustSetUp(
         ? VictimActor->FindComponentByClass<USkeletalMeshComponent>()
         : nullptr;
 
+    // Prefer the live bone position over HitLocation when a victim mesh and bone name are available.
     const FVector RawTargetWorld = (VictimMesh && TargetBoneName != NAME_None)
         ? VictimMesh->GetSocketLocation(TargetBoneName)
         : HitLocation;
 
+    // Pick the contact socket that is closest to the hit location (e.g., tip vs base of blade).
     FName   ClosestSocket      = ContactSockets[0];
     FVector ClosestSocketWorld = AttackerMesh->GetSocketLocation(ContactSockets[0]);
     float   MinDistSq          = FVector::DistSquared(HitLocation, ClosestSocketWorld);
@@ -124,6 +126,8 @@ void UThrustSystemNodes::ThrustSetUp(
         if (DSq < MinDistSq) { MinDistSq = DSq; ClosestSocketWorld = SW; ClosestSocket = ContactSockets[i]; }
     }
 
+    // Line-trace from the closest socket to the target to find the actual surface impact point,
+    // then push StabDepth into the surface so the blade visually penetrates.
     FVector TargetWorld      = RawTargetWorld;
     FVector TargetBoneOffset = FVector::ZeroVector;
     {
@@ -131,7 +135,7 @@ void UThrustSystemNodes::ThrustSetUp(
         FHitResult Hit;
         FCollisionQueryParams Params(NAME_None, false, AttackerActor);
         if (TraceWorld && TraceWorld->LineTraceSingleByChannel(
-                Hit, ClosestSocketWorld, RawTargetWorld, ECC_GameTraceChannel2, Params))
+                Hit, ClosestSocketWorld, RawTargetWorld, StabTraceChannel, Params))
         {
             const FVector TraceDir = (RawTargetWorld - ClosestSocketWorld).GetSafeNormal();
             TargetWorld      = Hit.ImpactPoint + TraceDir * StabDepth;
@@ -152,6 +156,8 @@ void UThrustSystemNodes::ThrustSetUp(
             : FTransform(CompTW_S);
         State.DomRestPos = CompTW_S.InverseTransformPosition(PivotBoneTM.GetLocation());
         State.DomRestRot = (CompTW_S.GetRotation().Inverse() * PivotBoneTM.GetRotation()).Rotator();
+        // Socket offset in hand-local space; constant so it can reconstruct the world hand pos
+        // from the rotation alone during ThrustPlant without re-querying the skeleton.
         State.SocketRelativeLocation = PivotBoneTM.GetRotation().Inverse().RotateVector(
             ClosestSocketWorld - PivotBoneTM.GetLocation());
     }
@@ -169,12 +175,16 @@ void UThrustSystemNodes::ThrustSetUp(
     const FVector RawTargetDir = (TargetWorld        - PivotWorld).GetSafeNormal();
 
     FVector TargetDir = RawTargetDir;
+    // If the target is behind the pivot, clamp to the tangent perpendicular to CurrentDir to
+    // avoid flipping the rotation 180 degrees and producing an unnatural over-reach.
     if (FVector::DotProduct(CurrentDir, RawTargetDir) < 0.f)
     {
         const FVector Tangent = (RawTargetDir - FVector::DotProduct(RawTargetDir, CurrentDir) * CurrentDir).GetSafeNormal();
         TargetDir = Tangent.IsNearlyZero() ? CurrentDir : Tangent;
     }
 
+    // Compute the rotation delta in component space: conjugate the world-space delta into CS
+    // so subsequent slerp stays in the same coordinate frame as the additive IK goals.
     const FQuat DeltaWorld    = FQuat::FindBetweenVectors(CurrentDir, TargetDir);
     const FQuat CompWorldQuat = CompTW_S.GetRotation();
     const FQuat DeltaCS       = CompWorldQuat.Inverse() * DeltaWorld * CompWorldQuat;
@@ -208,19 +218,18 @@ void UThrustSystemNodes::ThrustSetUp(
     State.PlantedRotCS      = FRotator::ZeroRotator;
     State.bRecovering       = false;
     State.bMontageReversing = false;
-    State.bExited           = false;
     State.LimitBone        = LimitBone;
     State.MaxDistFromBone  = MaxDistFromBone;
     State.StabDepth        = StabDepth;
-    State.SkipPlantBones   = SkipPlantBones;
-    State.bSkipPlant       = false;
     State.ArmReachPercent  = ArmReachPercent;
     State.HipLocGoal          = HipLocGoal;
     State.HipFollowPercent    = HipFollowPercent;
     State.ArmRecoverDuration  = ArmRecoverDuration > 0.f ? ArmRecoverDuration : RecoverDuration;
     State.HipRecoverDuration  = HipRecoverDuration > 0.f ? HipRecoverDuration : RecoverDuration;
     State.bDebug              = bDebug;
+    State.StabTraceChannel    = StabTraceChannel;
 
+    // Zero all goals so the ABP starts from a clean additive offset (zero = animation pose).
     SetAnimVec(AnimInst, DomLocGoal,   FVector::ZeroVector);
     SetAnimRot(AnimInst, DomRotGoal,   FRotator::ZeroRotator);
     SetAnimVec(AnimInst, SlaveLocGoal, FVector::ZeroVector);
@@ -229,7 +238,6 @@ void UThrustSystemNodes::ThrustSetUp(
         SetAnimVec(AnimInst, HipLocGoal, FVector::ZeroVector);
     if (SpineAlphaVarName != NAME_None)
         SetAnimFloat(AnimInst, SpineAlphaVarName, 0.f);
-
 }
 
 void UThrustSystemNodes::ThrustTick(
@@ -257,7 +265,8 @@ void UThrustSystemNodes::ThrustTick(
     const FQuat TargetRotCS = State.DomTargetRotCS.Quaternion().GetNormalized();
     const FQuat RotAdditive = FQuat::Slerp(FQuat::Identity, (RestRotCS.Inverse() * TargetRotCS).GetNormalized(), Alpha).GetNormalized();
 
-    // Resolve live victim bone each frame (same as ThrustPlant) so the target never jumps at handoff.
+    // Re-query victim bone each frame so the approach tracks a moving target without a pop at
+    // handoff to ThrustPlant (which also reads the live bone on its first frame).
     USkeletalMeshComponent* VictimMesh = State.VictimActor
         ? State.VictimActor->FindComponentByClass<USkeletalMeshComponent>()
         : nullptr;
@@ -265,8 +274,8 @@ void UThrustSystemNodes::ThrustTick(
         ? VictimMesh->GetSocketLocation(State.TargetBone) + State.TargetBoneOffset
         : State.TargetBoneWorld;
 
-    // Socket feedback scaled by Alpha: same convergence logic as ThrustPlant but ramped 0→1.
-    // At Alpha=1 the goal is identical to what ThrustPlant frame 1 would write — zero pop at handoff.
+    // Socket-feedback accumulator scaled by Alpha: same convergence pattern as ThrustPlant so
+    // the goal at Alpha=1 is identical to what ThrustPlant frame 1 would write (no pop at handoff).
     const FTransform CompTW         = State.AttackerMesh->GetComponentTransform();
     const FVector    SocketWorldCur = State.AttackerMesh->GetSocketLocation(State.ContactSocket);
     const FVector    SocketErrorCS  = CompTW.InverseTransformVector(LiveTargetWorld - SocketWorldCur);
@@ -289,27 +298,16 @@ void UThrustSystemNodes::ThrustTick(
         State.bActive         = false;
         State.bPlanted        = true;
         State.PlantedRotCS    = State.DomTargetRotCS;
-        State.bSkipPlant      = State.SkipPlantBones.Contains(State.TargetBone);
-
     }
 }
 
 void UThrustSystemNodes::ThrustPlant(
     FThrustState& State,
     float DeltaTime,
-    bool& bOutBlacklisted,
     bool& bOutComplete)
 {
-    bOutComplete    = false;
-    bOutBlacklisted = State.SkipPlantBones.Contains(State.TargetBone);
+    bOutComplete = false;
     if (!State.AttackerMesh) return;
-
-    if (State.SkipPlantBones.Contains(State.TargetBone))
-    {
-        State.bExited = true;
-        bOutComplete  = true;
-        return;
-    }
 
     UAnimInstance* AnimInst = State.AttackerMesh->GetAnimInstance();
     if (!AnimInst) return;
@@ -323,50 +321,39 @@ void UThrustSystemNodes::ThrustPlant(
 
     if (State.FramesRemaining == 0)
     {
+        // Capture world-space anchor on the first plant frame.
         State.PlantedTargetBoneWorld = (VictimMesh && State.TargetBone != NAME_None)
             ? VictimMesh->GetSocketLocation(State.TargetBone) + State.TargetBoneOffset
             : State.TargetBoneWorld;
 
-        // World-anchored hand rotation: stable under camera/character yaw (must be computed first)
+        // World-anchored hand rotation: must be computed before PlantedHandWorldPos because
+        // PlantedHandWorldPos is derived from this rotation.
         State.PlantedDomRotWorld = (CompQ * State.PlantedRotCS.Quaternion()).Rotator();
 
-        // Socket→hand world offset derived from rotation — invariant to spine/camera rotation.
-        // SocketRelativeLocation = hand-to-socket in hand local space (constant). Negating gives
-        // socket-to-hand world vector. Uses PlantedDomRotWorld computed just above.
+        // Reconstruct the world-space hand position from the rotation using the pre-computed
+        // SocketRelativeLocation (hand-to-socket offset in hand-local space). Negating gives
+        // socket-to-hand. This is stable under spine/camera rotation changes.
         State.PlantedHandWorldPos = -(State.PlantedDomRotWorld.Quaternion().RotateVector(State.SocketRelativeLocation));
 
         State.FramesRemaining = -1;
-
     }
 
     const FVector CurrentTargetWorld = (VictimMesh && State.TargetBone != NAME_None)
         ? VictimMesh->GetSocketLocation(State.TargetBone) + State.TargetBoneOffset
         : State.TargetBoneWorld;
 
-    // Socket-feedback: read the actual socket position from the mesh (reflects last frame's IK),
-    // measure the world-space error to the impact point, convert to CS, add to the running goal.
-    // Converges to zero error in 1 frame regardless of hand rotation or spine drift.
+    // Socket-feedback accumulator: read actual socket position (reflects last frame's IK result),
+    // measure world-space error to the impact point, convert to CS additive. Converges in 1 frame
+    // regardless of hand rotation or spine drift.
     const FVector SocketWorldCurrent = State.AttackerMesh->GetSocketLocation(State.ContactSocket);
     const FVector SocketErrorCS      = CompTW.InverseTransformVector(CurrentTargetWorld - SocketWorldCurrent);
     const FVector DomAdditive        = GetAnimVec(AnimInst, State.DomLocGoal) + SocketErrorCS;
 
-    // World-anchored rotation re-derived in current CS each frame
+    // Re-derive rotation additive in current CS each frame so the hand stays world-anchored
+    // even as the character rotates (camera yaw, root motion, etc.).
     const FQuat DesiredHandRotCS = CompQ.Inverse() * State.PlantedDomRotWorld.Quaternion();
     const FQuat RotAdditive      = State.DomRestRot.Quaternion().Inverse() * DesiredHandRotCS;
 
-    // Limit check: early-exit plant if the dom hand drifts too far from LimitBone
-    if (State.MaxDistFromBone > 0.f && State.LimitBone != NAME_None)
-    {
-        const FVector LimitBoneWorld = State.AttackerMesh->GetBoneLocation(State.LimitBone);
-        const FVector DomHandWorld   = CompTW.TransformPosition(State.DomRestPos + DomAdditive);
-        if (FVector::Dist(DomHandWorld, LimitBoneWorld) > State.MaxDistFromBone)
-        {
-            State.bExited = true;
-            bOutComplete  = true;
-        }
-    }
-
-    // Hip: proportional to dom additive
     if (State.HipLocGoal != NAME_None && State.HipFollowPercent > 0.f)
         SetAnimVec(AnimInst, State.HipLocGoal, DomAdditive * State.HipFollowPercent);
 
@@ -375,19 +362,18 @@ void UThrustSystemNodes::ThrustPlant(
     SetAnimVec(AnimInst, State.SlaveLocGoal, DomAdditive);
     SetAnimRot(AnimInst, State.SlaveRotGoal, RotAdditive.Rotator());
 
-    // Plant elapsed and spine alpha (spine ramps 0→1 over PlantDuration)
     if (State.PlantDuration > 0.f)
     {
         State.PlantElapsed += DeltaTime;
         if (State.PlantElapsed >= State.PlantDuration)
             bOutComplete = true;
     }
+    // Spine alpha ramps 0->1 over PlantDuration so the look-at fades in during the plant hold.
     const float PlantAlpha = (State.PlantDuration > 0.f)
         ? FMath::Clamp(State.PlantElapsed / State.PlantDuration, 0.f, 1.f)
         : 1.f;
     if (State.SpineAlphaVarName != NAME_None)
         SetAnimFloat(AnimInst, State.SpineAlphaVarName, PlantAlpha);
-
 }
 
 void UThrustSystemNodes::ThrustRecover(
@@ -427,6 +413,7 @@ void UThrustSystemNodes::ThrustRecover(
                 const float RealDuration = StartPos / FMath::Abs(ReverseRate);
                 State.MontagePos         = StartPos;
                 State.bMontageReversing  = true;
+                // Clamp arm/hip durations to the actual clip length so they don't outlast the montage.
                 State.ArmRecoverDuration = FMath::Min(State.ArmRecoverDuration, RealDuration);
                 State.HipRecoverDuration = FMath::Min(State.HipRecoverDuration, RealDuration);
                 AnimInst->Montage_Play(State.Montage, ReverseRate,
@@ -443,9 +430,9 @@ void UThrustSystemNodes::ThrustRecover(
 
     bool bDone = false;
 
-    // Skip the completion check on the init frame — Montage_Play was just called and the
-    // animation system hasn't evaluated yet, so Montage_GetPosition still returns the old
-    // frozen position (often 0), which would falsely trigger "reached end" and re-freeze.
+    // Skip the completion check on the init frame: Montage_Play was just called and the animation
+    // system has not evaluated yet, so Montage_GetPosition still returns the frozen position and
+    // would falsely trigger "reached end," re-freezing the montage at position 0.
     if (bAlreadyRecovering)
     {
         if (State.bMontageReversing)
@@ -465,7 +452,7 @@ void UThrustSystemNodes::ThrustRecover(
         }
     }
 
-    // Arms: lerp additive back to zero
+    // Arms: lerp additive goals back to zero over ArmRecoverDuration.
     {
         State.RecoverArmElapsed += DeltaTime;
         const float ArmAlpha = FMath::Clamp(State.RecoverArmElapsed / State.ArmRecoverDuration, 0.f, 1.f);
@@ -479,23 +466,23 @@ void UThrustSystemNodes::ThrustRecover(
         SetAnimRot(AnimInst, State.SlaveRotGoal,
             FQuat::Slerp(State.RecoverSlaveStartRotCS.Quaternion().GetNormalized(), FQuat::Identity, ArmAlpha).GetNormalized().Rotator());
 
-        // Spine un-rotates in sync with arm recovery
+        // Spine un-rotates in sync with arm recovery so head/spine arrive at rest together.
         if (State.SpineAlphaVarName != NAME_None)
             SetAnimFloat(AnimInst, State.SpineAlphaVarName, 1.f - ArmAlpha);
     }
 
-    // Hip: lerp additive back to zero
+    // Hip: independent duration so it can trail the arm recovery for added weight.
     if (State.HipLocGoal != NAME_None)
     {
         State.RecoverHipElapsed += DeltaTime;
         const float   HipAlpha   = FMath::Clamp(State.RecoverHipElapsed / State.HipRecoverDuration, 0.f, 1.f);
         SetAnimVec(AnimInst, State.HipLocGoal,
             FMath::Lerp(State.RecoverHipStartPosCS, FVector::ZeroVector, HipAlpha));
-
     }
 
     if (bDone)
     {
+        // Guarantee all goals land at zero regardless of lerp precision.
         SetAnimVec(AnimInst, State.DomLocGoal,   FVector::ZeroVector);
         SetAnimRot(AnimInst, State.DomRotGoal,   FRotator::ZeroRotator);
         SetAnimVec(AnimInst, State.SlaveLocGoal, FVector::ZeroVector);

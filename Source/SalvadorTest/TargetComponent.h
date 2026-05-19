@@ -14,6 +14,8 @@ enum class ETargetSlot : uint8
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FTargetStateChangedSignature, bool, bNewState);
 
+// Static mesh component placed on enemy characters as a hittable target slot.
+// Hidden by default; UTargetingSystemComponent shows/hides it based on aim state.
 UCLASS(ClassGroup = (Combat), meta = (BlueprintSpawnableComponent))
 class SALVADORTEST_API UTargetComponent : public UStaticMeshComponent
 {
@@ -33,6 +35,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Targeting")
     ETargetSlot TargetSlot;
 
+    // Fires when this slot becomes selected or deselected; BP_Victim uses this to update visuals.
     UPROPERTY(BlueprintAssignable, Category = "Targeting")
     FTargetStateChangedSignature OnTargetStateChanged;
 

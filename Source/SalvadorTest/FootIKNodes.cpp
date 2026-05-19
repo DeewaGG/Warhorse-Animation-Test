@@ -36,6 +36,8 @@ void UFootIKNodes::SetupFootIK(
     Foot.AnchorWorldPos  = ActorWorldPos;
     Foot.AnchorGoal      = CurrentGoal;
     Foot.bAnchored       = false;
+    // Start striding so the first SolveFoot call places the foot at NeutralGoal rather than
+    // leaving it at whatever position the calling code passes as CurrentGoal.
     Foot.bStriding       = true;
     Foot.StrideStartGoal = CurrentGoal;
     Foot.StrideElapsed   = 0.f;
@@ -75,6 +77,7 @@ void UFootIKNodes::SolveFoot(
         FVector2D CurrentXY = FMath::Lerp(StartXY, TargetXY, Alpha);
 
         float StepDist        = (NeutralXY - StartXY).Size();
+        // Cap height so short steps don't produce an unnaturally high arc.
         float EffectiveHeight = FMath::Min(Foot.ActiveHeight, StepDist * 0.3f);
 
         OutGoal = FVector(
@@ -92,11 +95,12 @@ void UFootIKNodes::SolveFoot(
             Foot.AnchorWorldPos = ActorWorldPos;
             Foot.AnchorGoal     = Foot.NeutralGoal;
             OutGoal             = Foot.AnchorGoal;
-            OutRot                  = FRotator::ZeroRotator;
-            Foot.bAnchored          = true;
-            Foot.bStriding          = false;
-            Foot.CooldownTimer      = Foot.ActiveCooldown;
+            OutRot              = FRotator::ZeroRotator;
+            Foot.bAnchored      = true;
+            Foot.bStriding      = false;
+            Foot.CooldownTimer  = Foot.ActiveCooldown;
 
+            // Randomize next stride params now so they're ready when the cooldown expires.
             Foot.ActiveDuration  = RandFromRange(Foot.StrideDuration);
             Foot.ActiveHeight    = RandFromRange(Foot.StrideHeight);
             Foot.ActiveReach     = RandFromRange(Foot.StrideReach);
@@ -113,6 +117,9 @@ void UFootIKNodes::SolveFoot(
                 Foot.CooldownTimer = 0.f;
         }
 
+        // Anti-slide: offset the goal by how much the actor has moved since last anchor so the
+        // foot appears locked to the ground. Z is intentionally ignored here — vertical movement
+        // (jumps, crouch) should not shift the IK goal horizontally.
         FVector WorldDelta = ActorWorldPos - Foot.AnchorWorldPos;
         FVector LocalDelta = ActorWorldRot.UnrotateVector(WorldDelta);
 
@@ -168,6 +175,9 @@ void UFootIKNodes::SolveFootIK(
     float LeftDistToHip  = FVector2D(LeftBoneWorld.X  - HipBoneWorld.X, LeftBoneWorld.Y  - HipBoneWorld.Y).Size();
     float RightDistToHip = FVector2D(RightBoneWorld.X - HipBoneWorld.X, RightBoneWorld.Y - HipBoneWorld.Y).Size();
 
+    // Solve the more displaced foot first. bAnyBusy is recalculated between solves so the second
+    // foot sees the stride that the first foot may have just started — preventing both feet from
+    // striding on the same frame.
     if (LeftDistToHip >= RightDistToHip)
     {
         SolveFoot(LeftFoot, ActorWorldPos, ActorWorldRot,

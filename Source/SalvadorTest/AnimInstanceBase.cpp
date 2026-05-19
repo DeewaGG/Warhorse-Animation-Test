@@ -10,6 +10,8 @@ void UAnimInstanceBase::NativeInitializeAnimation()
     GetMovComp();
 }
 
+// Call order matters: SyncPlayableCharacterData must run before ComputeTargetAlpha and
+// ComputeHandHeightIK so those functions read the same-frame TargetPos and SlotData.
 void UAnimInstanceBase::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
@@ -68,7 +70,7 @@ void UAnimInstanceBase::IsFalling()
 
 void UAnimInstanceBase::ComputeTargetAlpha()
 {
-    if (GetCurveValue(TEXT("LerpAttack")) <= 0.f || TargetPos.IsZero())
+    if (GetCurveValue(LerpAttackCurveName) <= 0.f || TargetPos.IsZero())
     {
         TargetAlpha = 0.f;
         return;
@@ -84,6 +86,7 @@ void UAnimInstanceBase::ComputeTargetAlpha()
     const FVector ToTarget = (TargetPos - Pawn->GetActorLocation()).GetSafeNormal();
     const float   Dot      = FVector::DotProduct(CamForward.GetSafeNormal(), ToTarget);
 
+    // Remap [TargetOriMinInfluence, 1] to [0, 1] so alpha fades in as the target enters view.
     TargetAlpha = FMath::Clamp((Dot - TargetOriMinInfluence) / (1.f - TargetOriMinInfluence), 0.f, 1.f);
 }
 
@@ -120,6 +123,7 @@ void UAnimInstanceBase::BodyIK(float DeltaSeconds)
     TraceFootIK(FootL, DeltaSeconds, LeftFootIKPosition,  LeftFootRot,  LeftFootIKAlpha);
     TraceFootIK(FootR, DeltaSeconds, RightFootIKPosition, RightFootRot, RightFootIKAlpha);
 
+    // Body drops to the lower foot so neither foot needs to over-extend.
     BodyIKOffset = FVector(0.f, 0.f, FMath::Min(RightFootIKPosition.Z, LeftFootIKPosition.Z));
 }
 
@@ -139,6 +143,7 @@ void UAnimInstanceBase::ComputeSpineLookAt()
     }
 
     const FVector ToTarget = (SpineLookAtWorldPos - Pawn->GetActorLocation()).GetSafeNormal();
+    // InverseTransformVectorNoScale keeps the direction in actor-local space without scale distortion.
     const FVector LocalDir = Pawn->GetActorTransform().InverseTransformVectorNoScale(ToTarget);
 
     const float Yaw   = FMath::RadiansToDegrees(FMath::Atan2(LocalDir.Y, LocalDir.X));
@@ -152,7 +157,7 @@ void UAnimInstanceBase::ComputeSpineLookAt()
 
 void UAnimInstanceBase::ComputeHandHeightIK(float DeltaSeconds)
 {
-    const float LerpAttack = GetCurveValue(TEXT("LerpAttack"));
+    const float LerpAttack = GetCurveValue(LerpAttackCurveName);
 
     FVector TargetPelvisOffset = FVector::ZeroVector;
 
@@ -199,7 +204,7 @@ void UAnimInstanceBase::ComputeHandHeightIK(float DeltaSeconds)
         }
     }
 
-    // Interpolate pelvis separately to avoid single-frame snap on attack start/end
+    // Interpolate pelvis separately to avoid single-frame snap on attack start/end.
     PelvisAdditiveOffset = FMath::VInterpTo(PelvisAdditiveOffset, TargetPelvisOffset, DeltaSeconds, PelvisInterpSpeed);
 }
 
@@ -208,17 +213,17 @@ void UAnimInstanceBase::TraceFootIK(FName FootBone, float DeltaSeconds, FVector&
     if (FootBone.IsNone() || !OwnerMesh) return;
 
     const FVector FootLoc = OwnerMesh->GetSocketLocation(FootBone);
-    const FVector RootLoc = OwnerMesh->GetSocketLocation(TEXT("root"));
+    const FVector RootLoc = OwnerMesh->GetSocketLocation(FootTraceRootBone);
 
-    const FVector Start(FootLoc.X, FootLoc.Y, RootLoc.Z + 50.f);
-    const FVector End  (FootLoc.X, FootLoc.Y, RootLoc.Z - 50.f);
+    const FVector Start(FootLoc.X, FootLoc.Y, RootLoc.Z + FootTraceUpOffset);
+    const FVector End  (FootLoc.X, FootLoc.Y, RootLoc.Z - FootTraceDownOffset);
 
     UWorld* World = GetWorld();
     if (!World) return;
 
     FHitResult Hit;
     FCollisionQueryParams Params(NAME_None, false, GetOwningActor());
-    const bool bFootHit = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
+    const bool bFootHit = World->LineTraceSingleByChannel(Hit, Start, End, FootTraceChannel, Params);
 
     const FVector  FootTargetPos = bFootHit ? FVector(0.f, 0.f, Hit.ImpactPoint.Z - RootLoc.Z) : FVector::ZeroVector;
     const float    Roll          = bFootHit ? FMath::RadiansToDegrees(FMath::Atan2(Hit.Normal.Y, Hit.Normal.Z)) : 0.f;

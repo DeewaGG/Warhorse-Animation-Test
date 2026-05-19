@@ -27,6 +27,7 @@ void UCurveSamplerNodes::SampleCurve(
         bOutFinished = true;
     }
 
+    // Normalize elapsed to [0,1] so the curve asset is independent of Duration.
     OutValue = Curve->GetFloatValue(
         FMath::Clamp(State.Elapsed / Duration, 0.f, 1.f));
 }

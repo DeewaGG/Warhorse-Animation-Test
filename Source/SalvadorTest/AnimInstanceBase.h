@@ -18,6 +18,7 @@ public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
+    // Called by UHitImpactComponent; not exposed to ABP children (SpineLookAtWorldPos is private).
     void SetSpineLookAtTarget(FVector WorldPos) { SpineLookAtWorldPos = WorldPos; }
 
     UPROPERTY(BlueprintReadWrite, Category = "State")
@@ -72,6 +73,7 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "FootIK")
     FRotator PlantedSlaveRot = FRotator::ZeroRotator;
 
+    // Additive offsets written by ThrustSystemNodes via reflection; zero = no modification.
     UPROPERTY(BlueprintReadOnly, Category = "Combat|IK")
     FVector DomHandAdditivePos = FVector::ZeroVector;
 
@@ -87,6 +89,7 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "Combat|IK")
     FVector PelvisAdditiveOffset = FVector::ZeroVector;
 
+    // Written by UHitImpactComponent (spine interp) and ThrustSystemNodes (plant/recover ramp).
     UPROPERTY(BlueprintReadOnly, Category = "Combat|SpineLook")
     float SpineLookAtAlpha = 0.f;
 
@@ -107,14 +110,12 @@ public:
 
 protected:
 
-    // ── References ───────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadOnly, Category = "References")
     TObjectPtr<UCharacterMovementComponent> MovementComponent;
 
     UPROPERTY(BlueprintReadOnly, Category = "References")
     TObjectPtr<USkeletalMeshComponent> OwnerMesh;
 
-    // ── Movement ─────────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
     FVector Velocity = FVector::ZeroVector;
 
@@ -130,7 +131,7 @@ protected:
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
     bool bIsFalling = false;
 
-    // ── PlayableCharacter data (read by ABP children) ─────────────────────────
+    // Synced from APlayableCharacter each frame by SyncPlayableCharacterData.
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
     float TurningSpeed = 0.f;
 
@@ -152,16 +153,20 @@ protected:
     FTargetSlotIKData   SlotData;
     FAttackGlobalLimits Limits;
 
+    // Dot-product threshold: TargetAlpha is 0 when the target is this far off-center from the camera forward.
     UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float TargetOriMinInfluence = 0.8f;
 
     UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "1.0"))
     float PelvisInterpSpeed = 10.f;
 
+    // Curve name on the attack montage that gates target alpha and hand height IK.
+    UPROPERTY(EditDefaultsOnly, Category = "Combat")
+    FName LerpAttackCurveName = TEXT("LerpAttack");
+
     UPROPERTY(EditDefaultsOnly, Category = "Combat|SpineLook")
     FName PelvisBone = TEXT("pelvis");
 
-    // ── Foot IK ──────────────────────────────────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
     FName FootL;
 
@@ -186,9 +191,22 @@ protected:
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
     float FootInterpSpeed = 10.f;
 
+    UPROPERTY(EditDefaultsOnly, Category = "FootIK|Setup")
+    FName FootTraceRootBone = TEXT("root");
+
+    UPROPERTY(EditDefaultsOnly, Category = "FootIK|Setup", meta = (ClampMin = "0.0"))
+    float FootTraceUpOffset = 50.f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "FootIK|Setup", meta = (ClampMin = "0.0"))
+    float FootTraceDownOffset = 50.f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "FootIK|Setup")
+    TEnumAsByte<ECollisionChannel> FootTraceChannel = ECC_Visibility;
+
 private:
     UPROPERTY() TObjectPtr<APlayableCharacter> OwningPlayableCharacter;
 
+    // Private so only SetSpineLookAtTarget can write it; prevents ABP Blueprint children from bypassing the API.
     FVector SpineLookAtWorldPos = FVector::ZeroVector;
 
     void GetMovComp();

@@ -4,6 +4,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "CurveSamplerNodes.generated.h"
 
+// Minimal state for SampleCurve; the ABP or component owns this struct.
 USTRUCT(BlueprintType)
 struct FCurveSamplerState
 {
@@ -20,6 +21,9 @@ class SALVADORTEST_API UCurveSamplerNodes : public UBlueprintFunctionLibrary
 
 public:
 
+    // Stateless time-based curve sampler. Pass bReset = true to restart from the beginning.
+    // OutValue is 0 and bOutFinished is false while Elapsed < Duration; bOutFinished fires exactly
+    // once on the frame Elapsed reaches Duration.
     UFUNCTION(BlueprintCallable, Category = "CurveSampler")
     static void SampleCurve(
         UPARAM(ref) FCurveSamplerState& State,

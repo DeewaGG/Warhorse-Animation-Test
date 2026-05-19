@@ -9,6 +9,7 @@ struct FFootIKState
 {
     GENERATED_BODY()
 
+    // ── Setup (written once by SetupFootIK) ──────────────────────────────────
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
     USkeletalMeshComponent* Mesh = nullptr;
 
@@ -18,6 +19,7 @@ struct FFootIKState
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
     FName HipBone = NAME_None;
 
+    // Resting IK goal (same space as OutGoal); anti-slide offsets from this each frame.
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
     FVector NeutralGoal = FVector::ZeroVector;
 
@@ -42,12 +44,14 @@ struct FFootIKState
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Setup")
     float PitchScale = 1.f;
 
+    // ── Runtime state ────────────────────────────────────────────────────────
+    // World position of the actor when the foot last anchored; used to compute anti-slide delta.
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
     FVector AnchorWorldPos = FVector::ZeroVector;
 
+    // IK goal held while not striding; updated each stride completion.
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
     FVector AnchorGoal = FVector::ZeroVector;
-
 
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
     bool bAnchored = false;
@@ -64,6 +68,7 @@ struct FFootIKState
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
     float CooldownTimer = 0.f;
 
+    // Randomized per-stride values (re-rolled at each stride completion).
     UPROPERTY(BlueprintReadWrite, Category = "FootIK|Runtime")
     float ActiveDuration = 0.3f;
 
@@ -87,6 +92,8 @@ class SALVADORTEST_API UFootIKNodes : public UBlueprintFunctionLibrary
 
 public:
 
+    // Initializes all state and triggers an immediate placement stride so the foot settles correctly
+    // before the first idle frame. Call once when the owning character becomes active.
     UFUNCTION(BlueprintCallable, Category = "FootIK")
     static void SetupFootIK(
         UPARAM(ref) FFootIKState& Foot,
@@ -104,6 +111,8 @@ public:
         float PitchScale
     );
 
+    // Solves both feet, prioritizing the foot that is furthest from the hip so the interlocking
+    // bAnyFootBusy gate is evaluated with the most demanding foot first.
     UFUNCTION(BlueprintCallable, Category = "FootIK")
     static void SolveFootIK(
         UPARAM(ref) FFootIKState& LeftFoot,
@@ -117,6 +126,8 @@ public:
         FRotator& OutRightRot
     );
 
+    // Returns true when both feet have finished striding and their cooldowns have elapsed.
+    // Used by UHitReactionComponent to know when reactive repositioning is complete.
     UFUNCTION(BlueprintCallable, Category = "FootIK")
     static bool AreFeetRepositioned(
         const FFootIKState& LeftFoot,
