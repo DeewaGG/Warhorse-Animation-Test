@@ -43,6 +43,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Targeting")
 	float TraceRange = 1500.f;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Targeting")
+	float TraceStartHeightOffset = 0.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Targeting|Debug")
 	bool bEnableDebug = false;
 

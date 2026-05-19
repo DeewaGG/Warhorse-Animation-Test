@@ -14,6 +14,10 @@ struct FHandIKSlotData
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
     FRotator RotationOffset = FRotator::ZeroRotator;
+
+    // Added to hit location Z when the victim is in low-health (wounded) state
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IK")
+    float WoundedZOffset = 0.f;
 };
 
 USTRUCT(BlueprintType)

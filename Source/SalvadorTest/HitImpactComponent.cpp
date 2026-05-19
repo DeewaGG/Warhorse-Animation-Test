@@ -2,6 +2,7 @@
 #include "AnimInstanceBase.h"
 #include "HitReactionComponent.h"
 #include "ThrustSystemNodes.h"
+#include "PlayableCharacter.h"
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "GameFramework/Character.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -59,6 +60,13 @@ void UHitImpactComponent::TickComponent(float DeltaTime, ELevelTick TickType,
             UThrustSystemNodes::ThrustPlant(State, DeltaTime, bBlacklisted, bComplete);
 
             bRecover = bComplete;
+            if (bRecover && State.bExited)
+            {
+                State.MontageRate = CapturedMontageRate * ExitReverseRateMultiplier;
+                State.MontagePos  = bExitForceFixedReverseFrame
+                    ? FMath::Max(0.f, ExitFixedReversePosition)
+                    : FMath::Max(0.f, CapturedMontageRawPos - ExitReverseStartOffset);
+            }
             if (bRecover && VictimActor)
             {
                 if (UHitReactionComponent* HRC = VictimActor->FindComponentByClass<UHitReactionComponent>())
@@ -101,15 +109,44 @@ void UHitImpactComponent::HitImpact(AActor* HitActor, FVector HitLocation,
     AnimInstance->SetSpineLookAtTarget(HitActor ? HitActor->GetActorLocation() : HitLocation);
     SpineTargetAlpha = 0.f; // ThrustPlant drives SpineLookAtAlpha directly; component only fades post-ThrustEnd
 
-    const float MontageRate = AnimInstance->Montage_GetPlayRate(Montage) * ReverseRateMultiplier;
-    const float MontagePos  = FMath::Max(0.f, AnimInstance->Montage_GetPosition(Montage) - ReverseStartOffset);
+    CapturedMontageRate   = AnimInstance->Montage_GetPlayRate(Montage);
+    CapturedMontageRawPos = AnimInstance->Montage_GetPosition(Montage);
+
+    const float MontageRate = CapturedMontageRate * ReverseRateMultiplier;
+    const float MontagePos  = bForceFixedReverseFrame
+        ? FMath::Max(0.f, FixedReversePosition)
+        : FMath::Max(0.f, CapturedMontageRawPos - ReverseStartOffset);
     AnimInstance->Montage_SetPlayRate(Montage, 0.f);
+
+    // Apply the DataTable per-slot position offset to the hit location.
+    // PositionOffset is in attacker component space — transform to world so ThrustSetUp
+    // receives the correctly shifted target regardless of attacker orientation.
+    FVector EffHitLocation = HitLocation;
+    if (APlayableCharacter* PC = Cast<APlayableCharacter>(GetOwner()))
+    {
+        const FVector& CSOffset = PC->CurrentSlotData.DomHand.PositionOffset;
+        if (!CSOffset.IsZero())
+        {
+            USkeletalMeshComponent* Mesh = OwnerCharacter ? OwnerCharacter->GetMesh() : nullptr;
+            if (Mesh)
+                EffHitLocation += Mesh->GetComponentTransform().TransformVector(CSOffset);
+        }
+
+        if (HitActor)
+        {
+            if (UHitReactionComponent* HRC = HitActor->FindComponentByClass<UHitReactionComponent>())
+            {
+                if (HRC->CurrentHP == 1)
+                    EffHitLocation.Z += PC->CurrentSlotData.DomHand.WoundedZOffset;
+            }
+        }
+    }
 
     UThrustSystemNodes::ThrustSetUp(
         State, GetOwner(), HitActor,
         DomLocGoal, DomRotGoal, SlaveLocGoal, SlaveRotGoal,
         ContactSockets, SkipPlantBones,
-        HitLocation, HitBone,
+        EffHitLocation, HitBone,
         HitReachDelay, PlantDuration, Montage, MontagePos, MontageRate,
         RecoverDuration, LimitBone, MaxDistFromBone,
         StabDepth, ArmReachPercent,

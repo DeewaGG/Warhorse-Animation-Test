@@ -53,6 +53,35 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Health")
     TArray<FName> BlacklistedHitBones;
 
+    // ── Low health simulation ─────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+              meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float LowHealthSimWeight = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+              meta = (ClampMin = "0.0"))
+    float LowHealthTransitionTime = 1.5f;
+
+    // Primary slow wave — breathing/laboured-struggle cadence (Hz)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+              meta = (ClampMin = "0.0"))
+    float LowHealthOscFrequency = 0.35f;
+
+    // Amplitude of the primary wave (blend weight units, 0-1)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+              meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float LowHealthOscAmplitude = 0.2f;
+
+    // Secondary faster wave — muscle-tremor layer (Hz)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+              meta = (ClampMin = "0.0"))
+    float LowHealthOscFrequency2 = 0.8f;
+
+    // Amplitude of the secondary wave (blend weight units, 0-1)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+              meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float LowHealthOscAmplitude2 = 0.08f;
+
     // ── Stunt timing ─────────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Stunt")
     double StuntTime = 1.0;
@@ -177,6 +206,11 @@ private:
     bool                bRepositioning = false;
     bool                bDoOnceFired   = false;
 
+    // ── Low health sim state ──────────────────────────────────────────────────
+    bool  bLowHealthActive = false;
+    float LowHealthElapsed = 0.f;
+    float LowHealthBlend   = 0.f;
+
     // ── Ragdoll state ─────────────────────────────────────────────────────────
     bool  bIsRagdoll     = false;
     float RagdollElapsed = 0.f;
@@ -210,4 +244,5 @@ private:
     void ReactiveSteps(float DeltaTime);
     void SimFinish();
     void OpenTickGate();
+    void LowHealthTick(float DeltaTime);
 };

@@ -1,6 +1,7 @@
 #include "PlayableCharacter.h"
 #include "AnimInstanceBase.h"
 #include "AttackData.h"
+#include "HitImpactComponent.h"
 #include "TargetingSystemComponent.h"
 #include "TargetComponent.h"
 #include "Camera/CameraComponent.h"
@@ -64,6 +65,8 @@ void APlayableCharacter::BeginPlay()
             ABP->OnMontageEnded.AddDynamic(this, &APlayableCharacter::OnAttackMontageEnded);
     }
 
+    HitImpactComp = FindComponentByClass<UHitImpactComponent>();
+
     AnimVars_BeginPlay();
 }
 
@@ -109,11 +112,13 @@ void APlayableCharacter::OnMove(const FInputActionValue& Value)
 
 void APlayableCharacter::OnMouseLook(const FInputActionValue& Value)
 {
+    if (HitImpactComp && HitImpactComp->IsThrusting()) return;
+
     const FVector2D Axes = Value.Get<FVector2D>();
 
     AddControllerYawInput(Axes.X);
     AddControllerPitchInput(Axes.Y);
-    TurnValuesUpdate(Axes.X * 1.15);
+    TurnValuesUpdate(Axes.X * TurningSpeedMultiplier);
     CamForwardUpdate();
 }
 

@@ -203,9 +203,12 @@ void UThrustSystemNodes::ThrustSetUp(
     State.RecoverDuration  = RecoverDuration;
     State.TotalFrames      = 0;
     State.FramesRemaining  = 0;
-    State.bActive          = true;
-    State.bPlanted         = false;
-    State.PlantedRotCS     = FRotator::ZeroRotator;
+    State.bActive           = true;
+    State.bPlanted          = false;
+    State.PlantedRotCS      = FRotator::ZeroRotator;
+    State.bRecovering       = false;
+    State.bMontageReversing = false;
+    State.bExited           = false;
     State.LimitBone        = LimitBone;
     State.MaxDistFromBone  = MaxDistFromBone;
     State.StabDepth        = StabDepth;
@@ -303,7 +306,8 @@ void UThrustSystemNodes::ThrustPlant(
 
     if (State.SkipPlantBones.Contains(State.TargetBone))
     {
-        bOutComplete = true;
+        State.bExited = true;
+        bOutComplete  = true;
         return;
     }
 
@@ -356,7 +360,10 @@ void UThrustSystemNodes::ThrustPlant(
         const FVector LimitBoneWorld = State.AttackerMesh->GetBoneLocation(State.LimitBone);
         const FVector DomHandWorld   = CompTW.TransformPosition(State.DomRestPos + DomAdditive);
         if (FVector::Dist(DomHandWorld, LimitBoneWorld) > State.MaxDistFromBone)
-            bOutComplete = true;
+        {
+            State.bExited = true;
+            bOutComplete  = true;
+        }
     }
 
     // Hip: proportional to dom additive
@@ -394,6 +401,8 @@ void UThrustSystemNodes::ThrustRecover(
 
     UAnimInstance* AnimInst = State.AttackerMesh->GetAnimInstance();
     if (!AnimInst) return;
+
+    const bool bAlreadyRecovering = State.bRecovering;
 
     if (!State.bRecovering)
     {
@@ -434,20 +443,26 @@ void UThrustSystemNodes::ThrustRecover(
 
     bool bDone = false;
 
-    if (State.bMontageReversing)
+    // Skip the completion check on the init frame — Montage_Play was just called and the
+    // animation system hasn't evaluated yet, so Montage_GetPosition still returns the old
+    // frozen position (often 0), which would falsely trigger "reached end" and re-freeze.
+    if (bAlreadyRecovering)
     {
-        const float CurPos = AnimInst->Montage_GetPosition(State.Montage);
-        if (CurPos <= KINDA_SMALL_NUMBER)
+        if (State.bMontageReversing)
         {
-            AnimInst->Montage_SetPlayRate(State.Montage, 0.f);
-            bDone = true;
+            const float CurPos = AnimInst->Montage_GetPosition(State.Montage);
+            if (CurPos <= KINDA_SMALL_NUMBER)
+            {
+                AnimInst->Montage_SetPlayRate(State.Montage, 0.f);
+                bDone = true;
+            }
         }
-    }
-    else
-    {
-        --State.RecoverFramesRemaining;
-        if (State.RecoverFramesRemaining <= 0)
-            bDone = true;
+        else
+        {
+            --State.RecoverFramesRemaining;
+            if (State.RecoverFramesRemaining <= 0)
+                bDone = true;
+        }
     }
 
     // Arms: lerp additive back to zero

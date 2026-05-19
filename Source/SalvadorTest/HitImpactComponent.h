@@ -23,6 +23,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "HitImpact")
     void PhysicRecovery(FName BoneName, FVector ImpulseDirection, float ImpulseMagnitude);
 
+    bool IsThrusting() const { return bThrustActive; }
+
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType,
@@ -84,6 +86,29 @@ public:
               meta = (ClampMin = "0.01"))
     float ReverseRateMultiplier = 1.0f;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Timing")
+    bool bForceFixedReverseFrame = false;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Timing",
+              meta = (ClampMin = "0.0", EditCondition = "bForceFixedReverseFrame"))
+    float FixedReversePosition = 0.0f;
+
+    // ── Early-exit reverse overrides (blacklist, distance, any incomplete hit) ─
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Exit",
+              meta = (ClampMin = "0.0"))
+    float ExitReverseStartOffset = 0.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Exit",
+              meta = (ClampMin = "0.01"))
+    float ExitReverseRateMultiplier = 0.5f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Exit")
+    bool bExitForceFixedReverseFrame = true;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Exit",
+              meta = (ClampMin = "0.0", EditCondition = "bExitForceFixedReverseFrame"))
+    float ExitFixedReversePosition = 0.08f;
+
     // ── Reach ─────────────────────────────────────────────────────────────────
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Reach",
               meta = (ClampMin = "0.0"))
@@ -128,6 +153,11 @@ private:
     bool         bThrust       = false;
     bool         bRecover      = false;
 
-    float SpineCurrentAlpha = 0.f;
-    float SpineTargetAlpha  = 0.f;
+    float SpineCurrentAlpha   = 0.f;
+    float SpineTargetAlpha    = 0.f;
+
+    // Raw values captured at hit time, before any multiplier — needed to recompute
+    // distance-exit-specific rate/pos without re-querying the (now-frozen) montage.
+    float CapturedMontageRate = 1.f;
+    float CapturedMontageRawPos = 0.f;
 };

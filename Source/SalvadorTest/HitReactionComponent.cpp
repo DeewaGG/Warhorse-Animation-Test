@@ -178,6 +178,29 @@ void UHitReactionComponent::OpenTickGate()
     bDoOnceFired = false;
 }
 
+void UHitReactionComponent::LowHealthTick(float DeltaTime)
+{
+    if (!bLowHealthActive || !Mesh) return;
+
+    LowHealthElapsed += DeltaTime;
+
+    // Blend-in: ramp the base weight from 0 to LowHealthSimWeight
+    const float BlendAlpha = (LowHealthTransitionTime > 0.f)
+        ? FMath::Clamp(LowHealthElapsed / LowHealthTransitionTime, 0.f, 1.f)
+        : 1.f;
+    LowHealthBlend = LowHealthSimWeight * BlendAlpha;
+
+    // Two sine waves at different frequencies — their combined pattern never exactly
+    // repeats, producing an organic struggling feel driven purely by physics weight.
+    // Wave 1: slow, like laboured breathing/shifting weight.
+    // Wave 2: faster, like involuntary muscle tremor layered on top.
+    const float Wave1 = LowHealthOscAmplitude  * FMath::Sin(LowHealthOscFrequency  * LowHealthElapsed * 2.f * PI);
+    const float Wave2 = LowHealthOscAmplitude2 * FMath::Sin(LowHealthOscFrequency2 * LowHealthElapsed * 2.f * PI);
+
+    const float EffBlend = FMath::Clamp(LowHealthBlend + Wave1 + Wave2, 0.f, 1.f);
+    Mesh->SetAllBodiesBelowPhysicsBlendWeight(MidSimBone, EffBlend, false, true);
+}
+
 bool UHitReactionComponent::CurveTickValues(float DeltaTime)
 {
     float duration = 0.f;
@@ -304,7 +327,8 @@ void UHitReactionComponent::ActivateRagdoll()
 {
     if (!Mesh || !PhysicAnimComp) return;
 
-    // Stop stunt: physics, tick, and ABP stun flag
+    // Stop stunt and low-health sim: physics, tick, and ABP stun flag
+    bLowHealthActive    = false;
     Mesh->SetAllBodiesBelowSimulatePhysics(RootSimBone, false, true);
     if (ABP) ABP->bIsStunned = false;
     bSimFinishTriggered = false;
@@ -330,6 +354,13 @@ void UHitReactionComponent::SimFinish()
 {
     if (!Mesh) return;
     Mesh->SetAllBodiesBelowSimulatePhysics(RootSimBone, false, true);
+
+    if (bLowHealthActive && PhysicAnimComp)
+    {
+        PhysicAnimComp->ApplyPhysicalAnimationProfileBelow(MidSimBone, PhysicalAnimProfile, true, true);
+        Mesh->SetAllBodiesBelowSimulatePhysics(MidSimBone, true, true);
+        Mesh->SetAllBodiesBelowPhysicsBlendWeight(MidSimBone, LowHealthBlend, false, true);
+    }
 }
 
 void UHitReactionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -383,9 +414,21 @@ void UHitReactionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
             {
                 if (ABP) ABP->bIsStunned = false;
                 SimFinish();
-                SetComponentTickEnabled(false);
                 bSimFinishTriggered = false;
                 bRepositioning      = false;
+
+                if (CurrentHP == 1 && !bLowHealthActive && PhysicAnimComp)
+                {
+                    bLowHealthActive = true;
+                    LowHealthElapsed = 0.f;
+                    LowHealthBlend   = 0.f;
+                    PhysicAnimComp->ApplyPhysicalAnimationProfileBelow(MidSimBone, PhysicalAnimProfile, true, true);
+                    Mesh->SetAllBodiesBelowSimulatePhysics(MidSimBone, true, true);
+                    Mesh->SetAllBodiesBelowPhysicsBlendWeight(MidSimBone, 0.f, false, true);
+                }
+
+                if (!bLowHealthActive)
+                    SetComponentTickEnabled(false);
             }
         }
     }
@@ -402,4 +445,6 @@ void UHitReactionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
             bResetHit    = false;
         }
     }
+
+    LowHealthTick(DeltaTime);
 }

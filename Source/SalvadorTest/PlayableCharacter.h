@@ -13,6 +13,7 @@ class UInputMappingContext;
 class UInputAction;
 class UAnimMontage;
 class UAnimInstanceBase;
+class UHitImpactComponent;
 
 UCLASS()
 class SALVADORTEST_API APlayableCharacter : public ACharacter
@@ -71,6 +72,10 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "Animation")
     FVector Cam_Forward = FVector::ZeroVector;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Animation",
+              meta = (ClampMin = "0.0"))
+    float TurningSpeedMultiplier = 1.f;
+
     UPROPERTY(BlueprintReadWrite, Category = "Combat")
     FVector TargetPos = FVector::ZeroVector;
 
@@ -81,7 +86,8 @@ public:
     FAttackGlobalLimits CurrentLimits;
 
 private:
-    UPROPERTY() TObjectPtr<UAnimInstanceBase> ABP;
+    UPROPERTY() TObjectPtr<UAnimInstanceBase>    ABP;
+    UPROPERTY() TObjectPtr<UHitImpactComponent>  HitImpactComp;
 
     void OnMove(const FInputActionValue& Value);
     void OnMouseLook(const FInputActionValue& Value);

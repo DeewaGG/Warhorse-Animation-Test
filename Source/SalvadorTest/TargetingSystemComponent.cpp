@@ -42,7 +42,7 @@ void UTargetingSystemComponent::PerformTrace()
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	FVector Start = Camera->GetComponentLocation();
+	FVector Start = Camera->GetComponentLocation() + FVector(0.f, 0.f, TraceStartHeightOffset);
 	FVector End = Start + (Camera->GetForwardVector() * TraceRange);
 
 	TArray<FHitResult> HitResults;

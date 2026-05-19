@@ -93,6 +93,9 @@ struct FThrustState
     bool bSkipPlant = false;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
+    bool bExited = false;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
     FName ContactSocket;
 
     UPROPERTY(BlueprintReadWrite, Category = "Thrust|Plant")
