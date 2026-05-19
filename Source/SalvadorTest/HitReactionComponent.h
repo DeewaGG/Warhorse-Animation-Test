@@ -62,6 +62,10 @@ public:
               meta = (ClampMin = "0.0"))
     float LowHealthTransitionTime = 1.5f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
+              meta = (ClampMin = "0.0"))
+    float LowHealthTickTimeout = 5.f;
+
     // Primary slow wave — breathing/laboured-struggle cadence (Hz)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|LowHealth",
               meta = (ClampMin = "0.0"))
@@ -165,6 +169,9 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
     FName RootSimBone = TEXT("root");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Bones")
+    FName NoPhysicsWoundedBone = TEXT("head");
 
     // ── Physical animation ────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Physics")

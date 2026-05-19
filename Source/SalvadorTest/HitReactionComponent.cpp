@@ -116,6 +116,12 @@ void UHitReactionComponent::ActivateSimBones()
         Mesh->AddImpulse(HitDir * HitStrength,         Bone, true);
         Mesh->AddImpulse(HitDir * HitStrength / 5.0,   Bone, true);
     }
+
+    if (bLowHealthActive && NoPhysicsWoundedBone != NAME_None)
+    {
+        Mesh->SetAllBodiesBelowSimulatePhysics(NoPhysicsWoundedBone, false, true);
+        Mesh->SetAllBodiesBelowPhysicsBlendWeight(NoPhysicsWoundedBone, 0.f, false, true);
+    }
 }
 
 void UHitReactionComponent::SetupVarsForSim()
@@ -183,6 +189,15 @@ void UHitReactionComponent::LowHealthTick(float DeltaTime)
     if (!bLowHealthActive || !Mesh) return;
 
     LowHealthElapsed += DeltaTime;
+
+    if (LowHealthTickTimeout > 0.f && LowHealthElapsed >= LowHealthTickTimeout)
+    {
+        Mesh->SetAllBodiesBelowPhysicsBlendWeight(MidSimBone, 0.f, false, true);
+        Mesh->SetAllBodiesBelowSimulatePhysics(MidSimBone, false, true);
+        bLowHealthActive = false;
+        SetComponentTickEnabled(false);
+        return;
+    }
 
     // Blend-in: ramp the base weight from 0 to LowHealthSimWeight
     const float BlendAlpha = (LowHealthTransitionTime > 0.f)
