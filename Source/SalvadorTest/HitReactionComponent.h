@@ -25,6 +25,31 @@ public:
     UFUNCTION(BlueprintCallable, Category = "HitReaction")
     void HitW_Physics(int32 InAttackSide, FName InBoneHit, FVector InHitDir, double InHitStrength);
 
+    UFUNCTION(BlueprintCallable, Category = "HitReaction")
+    void ActivateRagdoll();
+
+    UFUNCTION(BlueprintCallable, Category = "HitReaction")
+    void SetDeathPlantBlend(float Blend);
+
+    // ── Ragdoll transition ────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Ragdoll",
+              meta = (ClampMin = "0.0"))
+    float RagdollTransitionTime = 0.3f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Ragdoll")
+    TObjectPtr<UCurveFloat> RagdollTransitionCurve;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Ragdoll",
+              meta = (ClampMin = "0.0"))
+    float RagdollImpulse = 500.f;
+
+    // ── Health ────────────────────────────────────────────────────────────────
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Health")
+    int32 MaxHP = 3;
+
+    UPROPERTY(BlueprintReadOnly, Category = "HitReaction|Health")
+    int32 CurrentHP = 3;
+
     // ── Stunt timing ─────────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HitReaction|Stunt")
     double StuntTime = 1.0;
@@ -148,6 +173,10 @@ private:
     bool                bSimFinishTriggered = false;
     bool                bRepositioning = false;
     bool                bDoOnceFired   = false;
+
+    // ── Ragdoll state ─────────────────────────────────────────────────────────
+    bool  bIsRagdoll     = false;
+    float RagdollElapsed = 0.f;
 
     // ── IK state ──────────────────────────────────────────────────────────────
     FVector     StartPelvisPos        = FVector::ZeroVector;

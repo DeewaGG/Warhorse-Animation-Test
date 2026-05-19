@@ -63,27 +63,30 @@ void UHitReactionComponent::SetupComponent()
 
 void UHitReactionComponent::HitW_Physics(int32 InAttackSide, FName InBoneHit, FVector InHitDir, double InHitStrength)
 {
-    SetComponentTickEnabled(true);
+    CurrentHP = FMath::Max(0, CurrentHP - 1);
 
     AttackSide = InAttackSide;
+    ProtectHit(InHitDir, InHitStrength);
 
     HitBone = (InBoneHit == PelvisBoneName || InBoneHit.IsNone()) ? FallbackHitBone : InBoneHit;
 
     PhysicsBones.Reset();
     switch (AttackSide)
     {
-        case 0:  PhysicsBones = { UpperSimBone, HitBone };                                                               break;
-        case 1:  PhysicsBones = { MidSimBone, HitBone };                                                                 break;
+        case 0:  PhysicsBones = { UpperSimBone, HitBone };                                       break;
+        case 1:  PhysicsBones = { MidSimBone, HitBone };                                         break;
         case 2:
         {
             const bool bRightSide = HitBone.ToString().EndsWith(TEXT("_r"));
             PhysicsBones = { bRightSide ? LowerSimBoneR : LowerSimBoneL, HitBone };
             break;
         }
-        default: PhysicsBones = { MidSimBone, HitBone };                                                                 break;
+        default: PhysicsBones = { MidSimBone, HitBone };                                         break;
     }
 
-    ProtectHit(InHitDir, InHitStrength);
+    // Same behavior on every hit — stunt runs even on the death hit.
+    // ActivateRagdoll (triggered at ThrustRecover) overrides physics cleanly.
+    SetComponentTickEnabled(true);
     ActivateSimBones();
     SetupVarsForSim();
 }
@@ -293,6 +296,39 @@ void UHitReactionComponent::ReactiveSteps(float DeltaTime)
     bWasRStriding = RFootState.bStriding;
 }
 
+void UHitReactionComponent::SetDeathPlantBlend(float Blend)
+{
+    if (!Mesh) return;
+    for (const FName& Bone : PhysicsBones)
+        Mesh->SetAllBodiesBelowPhysicsBlendWeight(Bone, Blend, false, true);
+}
+
+void UHitReactionComponent::ActivateRagdoll()
+{
+    if (!Mesh || !PhysicAnimComp) return;
+
+    // Stop stunt: physics, tick, and ABP stun flag
+    Mesh->SetAllBodiesBelowSimulatePhysics(RootSimBone, false, true);
+    if (ABP) ABP->bIsStunned = false;
+    bSimFinishTriggered = false;
+    bRepositioning      = false;
+
+    if (CharacterMovement)
+        CharacterMovement->DisableMovement();
+
+    PhysicAnimComp->ApplyPhysicalAnimationProfileBelow(RootSimBone, TEXT("Ragdoll"), true, true);
+    Mesh->SetConstraintProfileForAll(TEXT("Ragdoll"), true);
+    Mesh->SetAllBodiesBelowSimulatePhysics(PelvisBoneName, true, true);
+    Mesh->SetAllBodiesBelowPhysicsBlendWeight(PelvisBoneName, 0.f, false, true);
+
+    if (RagdollImpulse > 0.f && !HitDir.IsZero())
+        Mesh->AddImpulse(-HitDir.GetSafeNormal() * RagdollImpulse, PelvisBoneName, true);
+
+    bIsRagdoll     = true;
+    RagdollElapsed = 0.f;
+    SetComponentTickEnabled(true);
+}
+
 void UHitReactionComponent::SimFinish()
 {
     if (!Mesh) return;
@@ -302,6 +338,20 @@ void UHitReactionComponent::SimFinish()
 void UHitReactionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (bIsRagdoll)
+    {
+        RagdollElapsed += DeltaTime;
+        const float T = (RagdollTransitionTime > 0.f)
+            ? FMath::Clamp(RagdollElapsed / RagdollTransitionTime, 0.f, 1.f)
+            : 1.f;
+        const float blend = RagdollTransitionCurve
+            ? RagdollTransitionCurve->GetFloatValue(T) : T;
+        Mesh->SetAllBodiesBelowPhysicsBlendWeight(PelvisBoneName, blend, false, true);
+        if (T >= 1.f)
+            SetComponentTickEnabled(false);
+        return;
+    }
 
     const bool bFinished = CurveTickValues(DeltaTime);
 

@@ -113,6 +113,7 @@ public:
 private:
     UPROPERTY() TObjectPtr<ACharacter>        OwnerCharacter;
     UPROPERTY() TObjectPtr<UAnimInstanceBase> AnimInstance;
+    UPROPERTY() TObjectPtr<AActor>            VictimActor;
 
     FThrustState State;
     bool         bThrustActive = false;

@@ -1,5 +1,6 @@
 #include "HitImpactComponent.h"
 #include "AnimInstanceBase.h"
+#include "HitReactionComponent.h"
 #include "ThrustSystemNodes.h"
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "GameFramework/Character.h"
@@ -52,7 +53,16 @@ void UHitImpactComponent::TickComponent(float DeltaTime, ELevelTick TickType,
             bool bBlacklisted = false;
             bool bComplete    = false;
             UThrustSystemNodes::ThrustPlant(State, DeltaTime, bBlacklisted, bComplete);
+
             bRecover = bComplete;
+            if (bRecover && VictimActor)
+            {
+                if (UHitReactionComponent* HRC = VictimActor->FindComponentByClass<UHitReactionComponent>())
+                {
+                    if (HRC->CurrentHP <= 0)
+                        HRC->ActivateRagdoll();
+                }
+            }
         }
         else
         {
@@ -76,6 +86,7 @@ void UHitImpactComponent::HitImpact(AActor* HitActor, FVector HitLocation,
 {
     if (!AnimInstance || !Montage) return;
 
+    VictimActor   = HitActor;
     SetComponentTickEnabled(true);
     bThrustActive = true;
     bThrust       = false;
