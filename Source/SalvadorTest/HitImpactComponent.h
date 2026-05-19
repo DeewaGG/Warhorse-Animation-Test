@@ -76,6 +76,10 @@ public:
               meta = (ClampMin = "0.0"))
     float HipRecoverDuration = 0.3f;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Timing",
+              meta = (ClampMin = "0.0"))
+    float ReverseStartOffset = 0.0f;
+
     // ── Reach ─────────────────────────────────────────────────────────────────
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ThrustSystem|Reach",
               meta = (ClampMin = "0.0"))

@@ -339,6 +339,8 @@ void UHitReactionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+    if (DeltaTime <= 0.f) return;
+
     if (bIsRagdoll)
     {
         RagdollElapsed += DeltaTime;

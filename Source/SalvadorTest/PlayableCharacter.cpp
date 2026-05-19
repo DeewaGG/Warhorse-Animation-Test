@@ -57,9 +57,12 @@ void APlayableCharacter::BeginPlay()
         }
     }
 
-    ABP = Cast<UAnimInstanceBase>(GetMesh()->GetAnimInstance());
-    if (ABP)
-        ABP->OnMontageEnded.AddDynamic(this, &APlayableCharacter::OnAttackMontageEnded);
+    if (USkeletalMeshComponent* CharMesh = GetMesh())
+    {
+        ABP = Cast<UAnimInstanceBase>(CharMesh->GetAnimInstance());
+        if (ABP)
+            ABP->OnMontageEnded.AddDynamic(this, &APlayableCharacter::OnAttackMontageEnded);
+    }
 
     AnimVars_BeginPlay();
 }
@@ -123,7 +126,9 @@ void APlayableCharacter::OnMouseLookCompleted(const FInputActionValue& Value)
 
 void APlayableCharacter::TurnValuesUpdate(double Axis)
 {
-    const double DeltaTime = GetWorld()->GetDeltaSeconds();
+    UWorld* World = GetWorld();
+    if (!World) return;
+    const double DeltaTime = World->GetDeltaSeconds();
     Turning_Speed = FMath::FInterpTo((float)Turning_Speed, (float)FMath::Abs(Axis), (float)DeltaTime, 10.f);
     if (Axis > 0.0) Turning_R = true;
     else            Turning_L = true;

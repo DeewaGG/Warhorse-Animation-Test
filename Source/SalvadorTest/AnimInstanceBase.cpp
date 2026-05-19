@@ -43,6 +43,7 @@ void UAnimInstanceBase::GetMovComp()
 
 void UAnimInstanceBase::VelocityAndSpeed()
 {
+    if (!MovementComponent) return;
     Velocity = MovementComponent->Velocity;
     Speed    = Velocity.Size2D();
 }
@@ -61,6 +62,7 @@ void UAnimInstanceBase::ShouldMove()
 
 void UAnimInstanceBase::IsFalling()
 {
+    if (!MovementComponent) return;
     bIsFalling = MovementComponent->IsFalling();
 }
 
@@ -203,7 +205,7 @@ void UAnimInstanceBase::ComputeHandHeightIK(float DeltaSeconds)
 
 void UAnimInstanceBase::TraceFootIK(FName FootBone, float DeltaSeconds, FVector& OutPos, FRotator& OutRot, float& OutAlpha)
 {
-    if (FootBone.IsNone()) return;
+    if (FootBone.IsNone() || !OwnerMesh) return;
 
     const FVector FootLoc = OwnerMesh->GetSocketLocation(FootBone);
     const FVector RootLoc = OwnerMesh->GetSocketLocation(TEXT("root"));

@@ -197,7 +197,7 @@ void UThrustSystemNodes::ThrustSetUp(
     State.PlantDuration    = PlantDuration;
     State.PlantElapsed     = 0.f;
     State.Montage          = Montage;
-    State.MontagePos       = MontageCurrentPos;
+    State.MontagePos       = FMath::Max(0.f, MontageCurrentPos);
     State.RecoverDuration  = RecoverDuration;
     State.TotalFrames      = 0;
     State.FramesRemaining  = 0;
@@ -248,9 +248,9 @@ void UThrustSystemNodes::ThrustTick(
     const int32 CurrentFrame = State.TotalFrames - State.FramesRemaining + 1;
     const float Alpha        = FMath::Clamp(float(CurrentFrame) / float(State.TotalFrames), 0.f, 1.f);
 
-    const FQuat RestRotCS   = State.DomRestRot.Quaternion();
-    const FQuat TargetRotCS = State.DomTargetRotCS.Quaternion();
-    const FQuat RotAdditive = FQuat::Slerp(FQuat::Identity, RestRotCS.Inverse() * TargetRotCS, Alpha);
+    const FQuat RestRotCS   = State.DomRestRot.Quaternion().GetNormalized();
+    const FQuat TargetRotCS = State.DomTargetRotCS.Quaternion().GetNormalized();
+    const FQuat RotAdditive = FQuat::Slerp(FQuat::Identity, (RestRotCS.Inverse() * TargetRotCS).GetNormalized(), Alpha).GetNormalized();
 
     // Resolve live victim bone each frame (same as ThrustPlant) so the target never jumps at handoff.
     USkeletalMeshComponent* VictimMesh = State.VictimActor
@@ -454,11 +454,11 @@ void UThrustSystemNodes::ThrustRecover(
         SetAnimVec(AnimInst, State.DomLocGoal,
             FMath::Lerp(State.RecoverDomStartPosCS, FVector::ZeroVector, ArmAlpha));
         SetAnimRot(AnimInst, State.DomRotGoal,
-            FQuat::Slerp(State.RecoverDomStartRotCS.Quaternion(), FQuat::Identity, ArmAlpha).Rotator());
+            FQuat::Slerp(State.RecoverDomStartRotCS.Quaternion().GetNormalized(), FQuat::Identity, ArmAlpha).GetNormalized().Rotator());
         SetAnimVec(AnimInst, State.SlaveLocGoal,
             FMath::Lerp(State.RecoverSlaveStartPosCS, FVector::ZeroVector, ArmAlpha));
         SetAnimRot(AnimInst, State.SlaveRotGoal,
-            FQuat::Slerp(State.RecoverSlaveStartRotCS.Quaternion(), FQuat::Identity, ArmAlpha).Rotator());
+            FQuat::Slerp(State.RecoverSlaveStartRotCS.Quaternion().GetNormalized(), FQuat::Identity, ArmAlpha).GetNormalized().Rotator());
 
         // Spine un-rotates in sync with arm recovery
         if (State.SpineAlphaVarName != NAME_None)

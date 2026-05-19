@@ -17,13 +17,17 @@ void UHitImpactComponent::BeginPlay()
     Super::BeginPlay();
     OwnerCharacter = Cast<ACharacter>(GetOwner());
     if (!OwnerCharacter) return;
-    AnimInstance = Cast<UAnimInstanceBase>(OwnerCharacter->GetMesh()->GetAnimInstance());
+    USkeletalMeshComponent* CharMesh = OwnerCharacter->GetMesh();
+    if (!CharMesh) return;
+    AnimInstance = Cast<UAnimInstanceBase>(CharMesh->GetAnimInstance());
 }
 
 void UHitImpactComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                                          FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (DeltaTime <= 0.f) return;
 
     // Spine look-at alpha — interpolates independently of thrust phase
     const float SpineInterp = (SpineTargetAlpha < SpineCurrentAlpha)
@@ -97,7 +101,7 @@ void UHitImpactComponent::HitImpact(AActor* HitActor, FVector HitLocation,
     AnimInstance->SetSpineLookAtTarget(HitActor ? HitActor->GetActorLocation() : HitLocation);
     SpineTargetAlpha = 0.f; // ThrustPlant drives SpineLookAtAlpha directly; component only fades post-ThrustEnd
 
-    const float MontagePos = AnimInstance->Montage_GetPosition(Montage);
+    const float MontagePos = FMath::Max(0.f, AnimInstance->Montage_GetPosition(Montage) - ReverseStartOffset);
     AnimInstance->Montage_SetPlayRate(Montage, 0.f);
 
     UThrustSystemNodes::ThrustSetUp(

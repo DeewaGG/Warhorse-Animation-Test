@@ -20,6 +20,7 @@ void UFootIKNodes::SetupFootIK(
     float FootSize,
     float PitchScale)
 {
+    if (!Mesh) return;
     Foot.Mesh            = Mesh;
     Foot.FootBone        = FootBone;
     Foot.HipBone         = HipBone;
@@ -153,7 +154,7 @@ void UFootIKNodes::SolveFootIK(
     OutLeftRot   = FRotator::ZeroRotator;
     OutRightRot  = FRotator::ZeroRotator;
 
-    if (!LeftFoot.Mesh)
+    if (!LeftFoot.Mesh || !RightFoot.Mesh)
         return;
 
     FVector LeftBoneWorld  = LeftFoot.Mesh->GetBoneLocation(LeftFoot.FootBone);
